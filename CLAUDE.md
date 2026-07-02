@@ -47,16 +47,32 @@ what the installed create-vite version ships.
 
 ## Current Status
 
-**Foundation only — no feature screens implemented yet.**
+**First feature built: Budget envelopes + dashboard home. Foundation otherwise unchanged.**
 
 Implemented:
 - Project scaffold (Vite + React 18 + TypeScript), clean `npm install`
-- Routing shell: `/` (HomePage) and `/about` (AboutPage) placeholders
+- Routing: `/` (dashboard home), `/budget` (Budget envelopes), `/about` (placeholder)
 - Tailwind v4 + shadcn/ui wired up (`components.json`, `src/lib/utils.ts`,
-  one proof-of-concept component: `src/components/ui/button.tsx`)
+  components: `button`, `card`, `progress`)
+- Semantic color tokens `--success`/`--info`/`--warning` added to
+  `src/index.css` (light + dark values) alongside the pre-existing
+  `--destructive`, since the installed shadcn Nova theme's `--chart-1..5`
+  are grayscale in this preset, not a colorful palette
 - TanStack Query `QueryClientProvider` wired in `src/main.tsx`
-- Zustand, React Hook Form, Zod, `@hookform/resolvers`, Recharts installed
-  as dependencies with documented (not yet used) conventions
+- **`useBudgetStore`** (Zustand) — first real store, seeded with 8 mock
+  budget categories; `updateSpent`/`addCategory` actions available but not
+  yet invoked by any UI
+- **Budget envelopes page** (`/budget`): per-category cards with progress
+  bars and overspend alerts (derived, not stored — see `src/lib/budget.ts`),
+  monthly + yearly (×12 derived) summary
+- **Dashboard home** (`/`): 3-column layout — centered "money overview" donut
+  (2 of 4 slices real, derived from `useBudgetStore`; 2 are mock constants)
+  flanked by 4 tall panels (Spending, Budget, Income, Tax). Only the Budget
+  panel is interactive (links to `/budget`); Spending/Income/Tax render full
+  mock content (trend arrows, insight lines) but aren't clickable — those
+  domains have no store/feature yet
+- React Hook Form, Zod, `@hookform/resolvers`, Recharts still installed as
+  dependencies with documented (not yet used) conventions
 - Firebase client SDK initialized (`src/lib/firebase.ts`) reading
   `VITE_FIREBASE_*` env vars; does not throw with empty/placeholder values
 - Firebase project scaffold: `firebase.json`, `.firebaserc` (placeholder
@@ -67,8 +83,11 @@ Implemented:
   functions yet)
 - Git hygiene: `.gitignore` added, `node_modules` untracked from git
 
-Not yet implemented: authentication, any data screens, Plaid/Veryfi/Resend
-integrations, tax engine, real Zustand stores, real forms, real charts.
+Not yet implemented: authentication, Firestore-backed data (Budget is
+mock/local Zustand state only), Spending/Income/Tax features (dashboard
+panels are static mock content), Plaid/Veryfi/Resend integrations, tax
+engine, real forms, real charts, dark-mode toggle (theme is class-based
+and CSS-ready, but nothing flips the `.dark` class yet).
 
 **Before real use**: a real Firebase project must be created (console or
 `firebase projects:create`) and swapped into `.firebaserc` via
@@ -81,18 +100,26 @@ setup — nothing to deploy yet.
 src/
   assets/          # static images/icons (currently empty — template assets removed)
   components/
-    ui/            # shadcn-generated primitives (button, etc.)
-    charts/        # Recharts wrapper components (future)
-  pages/           # route-level components (HomePage, AboutPage, future: Dashboard, Budget, etc.)
+    ui/            # shadcn-generated primitives (button, card, progress)
+    budget/        # Budget feature components (BudgetEnvelopeCard, BudgetSummary)
+    dashboard/     # Dashboard home components (DashboardPanel, MoneyOverviewCard)
+    charts/        # Recharts wrapper components (future — not the same as
+                    # MoneyOverviewCard's donut, which is a hand-rolled CSS
+                    # conic-gradient, not Recharts)
+  pages/           # route-level components (HomePage = dashboard, BudgetPage, AboutPage)
   stores/          # Zustand stores, one file per domain, named use<Domain>Store.ts
+                    # (useBudgetStore.ts is the first one)
   lib/
     firebase.ts    # Firebase SDK init: `app`, `db` eager; `getFirebaseAuth()` lazy
                     # (getAuth() throws eagerly on missing/invalid API key, unlike
                     # getFirestore() — call getFirebaseAuth() only where auth is used)
     utils.ts       # shadcn cn() helper
-    schemas/       # Zod schemas for forms
+    budget.ts      # derived budget helpers (isOverBudget, progressPercent) —
+                    # kept out of the store so nothing can drift out of sync
+    schemas/        # Zod schemas for forms
   hooks/           # custom hooks incl. TanStack Query hooks (created on first use)
-  types/           # shared TypeScript types (created on first use)
+  types/
+    budget.ts      # BudgetCategory, ChartColorToken
   vite-env.d.ts    # ImportMetaEnv typing for VITE_FIREBASE_* vars
 
 functions/
@@ -101,10 +128,32 @@ functions/
 
 Conventions:
 - Zustand stores: `src/stores/`, one file per domain slice, `use<Domain>Store.ts`
+- Derived/computed values (e.g. overspend, progress %) live in `src/lib/`,
+  not as extra fields on the store — avoids stored state drifting from the
+  raw numbers it's computed from
 - TanStack Query hooks: `src/hooks/`, colocated with the feature that uses them
 - Form schemas: `src/lib/schemas/` (Zod); forms use React Hook Form +
   `@hookform/resolvers/zod`
 - Chart components: `src/components/charts/` (Recharts wrappers)
+- Feature-specific component groupings: `src/components/<feature>/`
+  (e.g. `budget/`, `dashboard/`) — `components/ui/` is reserved for
+  shadcn-generated primitives only
+- **Never build Tailwind class names via template literals**
+  (e.g. `` `text-${variable}` ``) — Tailwind's JIT scanner only picks up
+  literal class-name strings that appear as complete tokens somewhere in
+  source. Use an explicit `Record<T, string>` lookup instead (see
+  `BudgetEnvelopeCard.tsx`'s `colorClass` map or `DashboardPanel.tsx`'s
+  `toneClasses`/`progressIndicatorClasses`). For genuinely dynamic values
+  (e.g. a computed conic-gradient), use inline `style`, not a class name.
+- shadcn `Progress`: fill element has `data-slot="progress-indicator"` —
+  target it via `[&_[data-slot=progress-indicator]]:bg-*` for color
+  overrides, not a positional selector like `[&>div]`.
+- Semantic color tokens: `--destructive` (pre-existing) plus `--success`/
+  `--info`/`--warning` (added this session) in `src/index.css`, each with
+  light + dark values, registered in the `@theme inline` block so Tailwind
+  generates `text-*`/`bg-*`/`border-*` utilities. Use these for meaning
+  (status, category identity) rather than `--chart-1..5`, which are
+  grayscale in the installed Nova preset.
 - Cloud Functions live in `functions/` — separate `package.json`/`tsconfig.json`,
   own dependency tree (`firebase-admin`, `firebase-functions`)
 - Client env vars: only `VITE_FIREBASE_*` (see `.env.example`). Plaid/Veryfi/Resend
@@ -160,3 +209,45 @@ above so it always reflects the real state of the repo.
   navigation works, no console errors.
 - No feature work done. Next session starts feature planning fresh (likely
   candidates: authentication, app shell/nav, first real Zustand store).
+
+### 2026-07-02 — Budget envelopes + dashboard home (first feature)
+- Started as a standalone Budget page linked from a plain Home page (per
+  the prior session's plan), but paused mid-implementation when the user
+  asked to discuss the home-screen architecture instead — used the
+  visualize tool to mock up a dashboard-with-panels concept before writing
+  any dashboard code, iterating through 3 rounds (panel layout → added
+  trend/insight lines + a central donut → moved the donut to the center
+  with tall panels flanking it) before locking in the design.
+- Built the Budget feature as originally planned: `src/types/budget.ts`,
+  `src/stores/useBudgetStore.ts` (8 mock categories), `src/lib/budget.ts`
+  (derived `isOverBudget`/`progressPercent`), `BudgetEnvelopeCard`,
+  `BudgetSummary`, `BudgetPage` at `/budget`. Added shadcn `card`/`progress`.
+- Built the dashboard home (`/`) per the approved mockup: `DashboardPanel`
+  (shared tall panel shell) and `MoneyOverviewCard` (donut). Only the
+  Budget panel is real/interactive this session — Spending/Income/Tax are
+  static mock content, matching the user's explicit choice to keep them
+  visually identical to the mockup but non-clickable.
+- Found the installed shadcn Nova theme's `--chart-1..5` tokens are
+  grayscale, not colorful — asked the user how to handle the mockup's
+  distinct panel colors, and added real `--success`/`--info`/`--warning`
+  CSS variables (light + dark) to `src/index.css` rather than either
+  faking colors with hex values or flattening the design to grayscale.
+- The donut's conic-gradient is computed in JS and applied via inline
+  `style` (not a Tailwind class) since the percentages are dynamic —
+  documented this pattern, plus the general "don't build Tailwind class
+  names via template literals" rule, in Architecture above.
+- Verified end-to-end via the dev server: dashboard renders correctly at
+  desktop width (single-column below the `md` breakpoint, 3-column above),
+  only the Budget panel is a real `<a>`/link element per the accessibility
+  tree, Budget page shows correct per-category over/under styling (exactly
+  matching mock data), monthly/yearly totals arithmetically correct, donut
+  slice values match the store's real totals, `tsc -b`/`npm run lint`/
+  `npm run build` all clean, dark-mode CSS variables verified correct via
+  manually toggling the `.dark` class (no toggle UI exists yet, so
+  `prefers-color-scheme` emulation alone doesn't activate it — that's
+  expected given no dark-mode toggle has been built).
+- Noted but not investigated further: the `preview_click` tool didn't
+  trigger React Router navigation on the dashboard's `Link` elements
+  (dispatching `.click()` via `preview_eval` worked immediately) — likely
+  a tool-level event quirk, not an app bug, since manual `.click()`
+  navigated correctly both directions.
