@@ -50,7 +50,7 @@ export function AddBudgetDialog() {
     formState: { errors },
   } = useForm<AddBudgetInput>({
     resolver: zodResolver(addBudgetSchema),
-    defaultValues: { type: 'fixed', name: '' },
+    defaultValues: { type: 'fixed', name: '', resetDay: 1 },
     // Without this, switching from "Fixed" to "Percentage" leaves the
     // now-hidden monthlyAmount field's stale value (an empty string run
     // through valueAsNumber, i.e. NaN) sitting in the form state — Zod's
@@ -68,8 +68,8 @@ export function AddBudgetDialog() {
       name: data.name,
       icon: Tag,
       color,
-      monthlySpent: 0,
       isCustom: true as const,
+      resetDay: data.resetDay,
     }
 
     if (data.type === 'fixed') {
@@ -83,7 +83,7 @@ export function AddBudgetDialog() {
       })
     }
 
-    reset({ type: 'fixed', name: '' })
+    reset({ type: 'fixed', name: '', resetDay: 1 })
     setOpen(false)
   }
 
@@ -109,6 +109,21 @@ export function AddBudgetDialog() {
             <Input id="name" placeholder="e.g. Emergency fund" {...register('name')} />
             {errors.name && (
               <p className="text-xs text-destructive">{errors.name.message}</p>
+            )}
+          </div>
+
+          <div className="space-y-1.5">
+            <Label htmlFor="resetDay">Resets on day of month</Label>
+            <Input
+              id="resetDay"
+              type="number"
+              min={1}
+              max={31}
+              step="1"
+              {...register('resetDay', { valueAsNumber: true })}
+            />
+            {errors.resetDay && (
+              <p className="text-xs text-destructive">{errors.resetDay.message}</p>
             )}
           </div>
 

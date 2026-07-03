@@ -61,11 +61,13 @@ Implemented:
 - TanStack Query `QueryClientProvider` wired in `src/main.tsx`
 - **`useBudgetStore`** (Zustand) — first real store. Holds `categories`
   (`BudgetCategory[]`, a `fixed`/`percentage` discriminated union — see
-  Architecture below), `paychecks` (`Paycheck[]`), `bankBalance`,
-  `paychecksPerMonth`. Actions: `updateSpent`, `addCategory`, `addPaycheck`,
-  `removePaycheck`, `setBankBalance`, `setPaychecksPerMonth`. Seeded with 9
-  mock categories (7 fixed + 2 percentage: Savings 15%-of-income, Tax
-  Savings 12%-per-paycheck) and 2 mock paychecks dated in the current month
+  Architecture below), `paychecks` (`Paycheck[]`), `purchases`
+  (`Purchase[]`), `bankBalance`, `paychecksPerMonth`. Actions: `addCategory`,
+  `addPaycheck`, `removePaycheck`, `addPurchase`, `removePurchase`,
+  `setBankBalance`, `setPaychecksPerMonth`. Seeded with 9 mock categories (7
+  fixed + 2 percentage: Savings 15%-of-income, Tax Savings 12%-per-paycheck),
+  2 mock paychecks, and ~19 itemized mock purchases (all dated in the
+  current month)
 - **Income tracking**: paychecks are the source of truth for income —
   "money earned this month" is *derived* by summing paychecks dated in the
   current month (`src/lib/income.ts`), not a separately-typed number, so it
@@ -77,13 +79,34 @@ Implemented:
 - **Budget envelopes page** (`/budget`): `IncomeOverview` (earned this
   month, projected this year, editable bank balance, this-month paycheck
   list with remove + an "Add paycheck" dialog), `BudgetSummary`
-  (monthly/yearly totals, ×12 derived), category grid with an "Add budget"
-  dialog (name + fixed-amount-or-percentage, React Hook Form + Zod — the
-  first real form in the app), overspend alerts derived per-category (not
-  stored — see `src/lib/budget.ts`)
-- **Dashboard home** (`/`): 3-column layout — centered "money overview" donut
-  (Spent + Remaining budget derived from `useBudgetStore`; Available balance
-  now real too, from `bankBalance`; Tax reserve remains a mock constant, no
+  (monthly/yearly totals, ×12 derived), a log-style row list (not a card
+  grid) with an "Add budget" dialog (name + fixed-amount-or-percentage +
+  reset day, React Hook Form + Zod), overspend alerts derived per-category
+  (not stored — see `src/lib/budget.ts`)
+- **Itemized purchases**: a category's "spent" amount isn't stored — it's
+  *derived* by summing that category's `Purchase` records (date,
+  description, amount) that fall within its current reset cycle (see
+  `getCategorySpent` in `src/lib/purchases.ts`), same derived-not-stored
+  pattern as income. Clicking a category row expands an inline panel below
+  it (`CategoryPurchases`) showing that category's purchase list (with
+  remove buttons) plus a small React Hook Form + Zod "add purchase" form
+  (date, description, amount)
+- **Recurring reset cycles**: every category has a `resetDay` (1–31) and
+  recurs monthly on that day rather than always the calendar month — e.g.
+  resetDay 15 means the category's current cycle is "the 15th of last
+  month" through "the 14th of this month" once you're past the 15th, or
+  the prior month's 15th–14th before it. Each row shows its current
+  cycle's start–end date (`src/lib/period.ts`, `getCurrentPeriod`).
+  Because spending is derived from purchases filtered to the current
+  cycle, a rollover "resets" spending for free — a purchase dated outside
+  the new cycle just stops counting, no stored total to zero out (this
+  replaced an earlier `periodStart`/`checkPeriodResets` polling mechanism
+  that's no longer needed — see Session Log)
+- **Dashboard home** (`/`): 3-column layout, sized to fill the viewport at
+  desktop widths (`md:h-screen` + flex/grid stretching, mobile keeps a
+  normal scrolling stack) — centered "money overview" donut (Spent +
+  Remaining budget derived from `useBudgetStore`; Available balance now
+  real too, from `bankBalance`; Tax reserve remains a mock constant, no
   running tax-reserve total exists yet) flanked by 4 tall panels (Spending,
   Budget, Income, Tax). Only the Budget panel is interactive (links to
   `/budget`) and shows real derived totals; Spending/Income/Tax render full
@@ -120,8 +143,9 @@ src/
   components/
     ui/            # shadcn-generated primitives (button, card, progress,
                     # dialog, input, label, select)
-    budget/        # Budget feature components (BudgetEnvelopeCard, BudgetSummary,
-                    # IncomeOverview, AddBudgetDialog, AddPaycheckDialog)
+    budget/        # Budget feature components (BudgetEnvelopeRow, BudgetSummary,
+                    # IncomeOverview, AddBudgetDialog, AddPaycheckDialog,
+                    # CategoryPurchases — the expand-on-click purchase log/add form)
     dashboard/     # Dashboard home components (DashboardPanel, MoneyOverviewCard)
     charts/        # Recharts wrapper components (future — not the same as
                     # MoneyOverviewCard's donut, which is a hand-rolled CSS
@@ -129,24 +153,32 @@ src/
   pages/           # route-level components (HomePage = dashboard, BudgetPage, AboutPage)
   stores/          # Zustand stores, one file per domain, named use<Domain>Store.ts
                     # (useBudgetStore.ts is the first one — categories, paychecks,
-                    # bankBalance, paychecksPerMonth all live here)
+                    # purchases, bankBalance, paychecksPerMonth all live here)
   lib/
     firebase.ts    # Firebase SDK init: `app`, `db` eager; `getFirebaseAuth()` lazy
                     # (getAuth() throws eagerly on missing/invalid API key, unlike
                     # getFirestore() — call getFirebaseAuth() only where auth is used)
-    utils.ts       # shadcn cn() helper
+    utils.ts       # shadcn cn() helper, formatCurrency() (always 2 decimals —
+                    # needed anywhere a value sums user-entered purchase amounts)
     budget.ts      # derived budget helpers (isOverBudget, progressPercent) — take
-                    # an already-computed monthlyTarget, don't compute it themselves
+                    # plain `spent`/`monthlyTarget` numbers, not a category object
     income.ts      # derived income helpers (getMonthlyIncome, getYearlyProjectedIncome,
                     # getAveragePaycheckAmount, getMonthlyTarget — resolves a
                     # BudgetCategory's dollar target from income context)
+    purchases.ts   # derived spending helpers (getCategoryPurchases, getCategorySpent) —
+                    # a category's spend is summed from Purchase records filtered to
+                    # its current period, never stored directly
+    period.ts      # recurring reset-cycle date math (getCurrentPeriod,
+                    # formatPeriodRange) — a category's resetDay (1-31) maps to
+                    # a current start/end date range; day-clamped for short months
     schemas/
-      budget.ts    # Zod schemas: addBudgetSchema, addPaycheckSchema
+      budget.ts    # Zod schemas: addBudgetSchema, addPaycheckSchema, addPurchaseSchema
   hooks/           # custom hooks incl. TanStack Query hooks (created on first use)
   types/
-    budget.ts      # BudgetCategory (fixed | percentage discriminated union),
-                    # ChartColorToken, DistributiveOmit utility
+    budget.ts      # BudgetCategory (fixed | percentage discriminated union,
+                    # each with resetDay), ChartColorToken, DistributiveOmit utility
     paycheck.ts    # Paycheck (id, amount, date as ISO "YYYY-MM-DD" string)
+    purchase.ts    # Purchase (id, categoryId, date, description, amount)
   vite-env.d.ts    # ImportMetaEnv typing for VITE_FIREBASE_* vars
 
 functions/
@@ -175,7 +207,7 @@ Conventions:
   (e.g. `` `text-${variable}` ``) — Tailwind's JIT scanner only picks up
   literal class-name strings that appear as complete tokens somewhere in
   source. Use an explicit `Record<T, string>` lookup instead (see
-  `BudgetEnvelopeCard.tsx`'s `colorClass` map or `DashboardPanel.tsx`'s
+  `BudgetEnvelopeRow.tsx`'s `colorClass` map or `DashboardPanel.tsx`'s
   `toneClasses`/`progressIndicatorClasses`). For genuinely dynamic values
   (e.g. a computed conic-gradient), use inline `style`, not a class name.
 - shadcn `Progress`: fill element has `data-slot="progress-indicator"` —
@@ -384,3 +416,140 @@ above so it always reflects the real state of the repo.
   year"/every percentage-budget target recalculated correctly; confirmed
   the dashboard's Budget panel and money-overview donut pick up the same
   real totals. `tsc -b`, `npm run lint`, `npm run build` all clean.
+
+### 2026-07-03 — Dashboard fills the screen
+- User asked for the dashboard panels to fill the whole screen instead of
+  sitting as a small centered block. Changed `HomePage.tsx`'s `<main>` to
+  `md:h-screen` (desktop only — mobile keeps normal scrolling, since
+  forcing 5 stacked cards into one screen height on a phone would make
+  each absurdly short), made the 3-column grid `md:flex-1 md:grid-rows-1`
+  (CSS Grid rows are content-sized by default even in a stretched
+  container — `grid-rows-1` is what actually makes the single row fill
+  100% of the available height), and gave each stacked `DashboardPanel`
+  `md:flex-1` so two panels split their column evenly.
+- Verified via `getBoundingClientRect()` rather than trusting the
+  low-resolution preview screenshot, which made the layout look like it
+  had a large empty gap at the bottom even though it didn't — confirmed
+  page height was exactly the 900px viewport with zero scroll overflow
+  and panels were genuinely ~400px tall each. Worth remembering: for
+  "does this fill the available space" questions, computed layout
+  geometry is more trustworthy than eyeballing a compressed screenshot.
+
+### 2026-07-03 — Budget log view + recurring reset cycles
+- User asked for the Budget screen's category list to become a log/row
+  view (date range on the left, name, a progress bar in the middle, spent
+  vs. target on the right, percentage shown for percentage-type
+  categories) instead of a card grid, plus support for each category
+  resetting on a configurable date rather than always the calendar month.
+  Clarified up front: the reset date is a recurring day-of-month (not a
+  one-off manual range), and spending should automatically zero out once
+  a cycle rolls over.
+- Added `src/lib/period.ts`: `getCurrentPeriod(resetDay, reference)`
+  computes the currently-active start/end date for a category given its
+  recurring reset day, clamping to the real last day of shorter months
+  (so resetDay 31 becomes Feb 28/29 instead of overflowing into March).
+  Hand-verified with a throwaway `tsx` script against several edge cases
+  (mid-cycle vs. just-reset, day-clamping, December→January year
+  rollover) before wiring it into the app — cheaper to catch date-math
+  bugs there than by clicking through the UI. `formatPeriodRange` renders
+  it as "Jul 5 – Aug 4" for display, again parsing the ISO string's own
+  Y/M/D components rather than `new Date(isoString)` to dodge the
+  UTC-midnight timezone shift documented elsewhere in this file.
+- Extended `BudgetCategory` with `resetDay` (1-31) and `periodStart` (the
+  last-known-active cycle's start date, persisted so a rollover can
+  actually be detected). Added `checkPeriodResets` to `useBudgetStore`:
+  compares each category's stored `periodStart` against a freshly
+  computed current period, and if they differ, zeroes `monthlySpent` and
+  advances `periodStart`. There's no backend/cron to run this at the
+  exact reset moment, so "automatic" means: run once when `BudgetPage`
+  mounts, and again every 60 seconds via a `useEffect` interval while the
+  page stays open — a reasonable approximation of automatic given a
+  frontend-only app, with a documented ~1-minute worst-case lag.
+- Added a "Resets on day of month" field to `AddBudgetDialog` (applies to
+  both fixed and percentage categories, defaults to 1 — the existing
+  calendar-month behavior). `periodStart` is computed via
+  `getCurrentPeriod` at creation time.
+- Replaced `BudgetEnvelopeCard.tsx` (a card grid tile) with
+  `BudgetEnvelopeRow.tsx` (a horizontal log row: date range → name/icon →
+  progress bar → spent/target, stacking vertically below `sm:`) and swapped
+  `BudgetPage`'s card grid for a single bordered `divide-y` list.
+- Verified end-to-end: all 9 seeded categories render correctly as rows
+  with their calendar-month range ("Jul 1 – Jul 31"); added a category
+  with `resetDay: 10` and confirmed it correctly showed "Jun 10 – Jul 9"
+  (today, Jul 3, is before the 10th, so the active cycle started last
+  month); directly exercised `checkPeriodResets` by writing a stale
+  `periodStart` onto a category via the store and confirming
+  `monthlySpent` zeroed out and `periodStart` advanced. `tsc -b`,
+  `npm run lint`, `npm run build` all clean.
+
+### 2026-07-03 — Itemized purchases per category
+- User asked for each category row to be clickable, expanding an inline
+  panel (their words: "drop down") showing a list of purchases logged
+  against that category plus a small form to add a new one (date,
+  description, cost) — using Groceries as the example. Clarified up
+  front that the expansion should happen inline below the clicked row
+  (accordion-style), not in a popup dialog like the existing "Add
+  budget"/"Add paycheck" forms.
+- This meant category spending could no longer be a single stored
+  `monthlySpent` number — it had to become a sum of individual purchase
+  records, mirroring how income already works (paychecks summing to a
+  derived monthly total, not a manually-typed figure). Added
+  `src/types/purchase.ts` (`Purchase`: id, categoryId, date, description,
+  amount) and `src/lib/purchases.ts` (`getCategoryPurchases`/
+  `getCategorySpent`, filtering a category's purchases to its *own*
+  current period via `getCurrentPeriod(category.resetDay)`). Removed
+  `monthlySpent` from `BudgetCategory` entirely — every consumer
+  (`BudgetEnvelopeRow`, `BudgetSummary`, `MoneyOverviewCard`, `HomePage`)
+  now computes it live from `purchases` instead of reading a stored field.
+  `isOverBudget`/`progressPercent` in `src/lib/budget.ts` were simplified
+  to take a plain `spent: number` instead of a whole category object,
+  decoupling them from the category type entirely.
+- **This made last session's `periodStart`/`checkPeriodResets` polling
+  mechanism completely unnecessary and it was removed.** The entire
+  reason that machinery existed was to detect a cycle rollover and
+  manually zero out the stored `monthlySpent` field. With spend now
+  *derived* by filtering purchases to the live-computed current period,
+  a rollover requires zero extra logic — a purchase dated in the old
+  cycle simply stops being included in the sum once `getCurrentPeriod`
+  advances. Removed `periodStart` from `BudgetCategory`, removed
+  `checkPeriodResets` from the store, and removed the `useEffect`
+  interval from `BudgetPage`. Net simplification, not just a feature
+  addition — worth remembering that "make X derived instead of stored"
+  refactors can retroactively obsolete earlier workarounds.
+- Built `CategoryPurchases.tsx`: renders under a row only while expanded
+  (so, unlike the Dialog-based forms, `useForm`'s `defaultValues` are
+  captured fresh on every mount — no lazy-mount timing issue to work
+  around here, though the date field still gets the belt-and-suspenders
+  explicit `defaultValue` prop for consistency with `AddPaycheckDialog`).
+  Purchase list shows most-recent-first with a remove button per item;
+  the add form is React Hook Form + Zod (`addPurchaseSchema` in
+  `src/lib/schemas/budget.ts`), matching every other form in the app.
+- Made `BudgetEnvelopeRow`'s whole row a real `<button>` (not a `div`
+  with manually-wired `onClick`/keyboard handling) wrapping everything
+  except the expanded panel, which renders as a sibling below it —
+  `<button>` can't contain other interactive elements, so the
+  purchase-list buttons had to live outside it, not nested inside.
+  Local `useState` tracks each row's own expand/collapse independently
+  (no need to lift state up — rows don't coordinate with each other).
+- Found a real formatting bug during verification: `spent` can now carry
+  cents (real purchase amounts, unlike the old whole-dollar mock data),
+  and `.toLocaleString()` without fixed decimals rendered a $32.50
+  purchase as "$32.5". Added `formatCurrency()` (always 2 decimals) to
+  `src/lib/utils.ts` and applied it everywhere a purchase-derived total
+  displays (`BudgetEnvelopeRow`, `CategoryPurchases`, `BudgetSummary`,
+  `HomePage`'s Budget panel) — left `MoneyOverviewCard`'s legend as its
+  existing whole-dollar rounding, a reasonable choice for a high-level
+  visual summary rather than a bug needing the same fix.
+- Reseeded `useBudgetStore` with ~19 itemized mock purchases (e.g.
+  Groceries: Trader Joe's $148 + Safeway $200 + Costco $120 = $468)
+  chosen to sum to the exact totals the old flat `monthlySpent` mock
+  values used, so the app's existing demo scenarios (Dining Out and
+  Subscriptions over budget) still hold.
+- Verified end-to-end via the dev server: every row's derived spent total
+  matched the old hardcoded totals exactly; expanding Groceries showed
+  its 3 purchases correctly sorted most-recent-first; added a "Whole
+  Foods run" $32.50 purchase and confirmed the row total updated to
+  $500.50 live (crossing into overspend territory correctly); removed it
+  again and confirmed the total reverted to $468.00; confirmed the
+  expand/collapse toggle works in both directions. `tsc -b`,
+  `npm run lint`, `npm run build` all clean.

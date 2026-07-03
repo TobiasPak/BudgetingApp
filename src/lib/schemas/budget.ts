@@ -18,6 +18,11 @@ export const addBudgetSchema = z
   .object({
     type: z.enum(['fixed', 'percentage']),
     name: z.string().min(1, 'Name is required'),
+    resetDay: z
+      .number()
+      .int('Must be a whole number')
+      .min(1, 'Must be between 1 and 31')
+      .max(31, 'Must be between 1 and 31'),
     monthlyAmount: z.number().optional(),
     percent: z.number().optional(),
     basis: z.enum(['paycheck', 'monthlyIncome']).optional(),
@@ -53,3 +58,11 @@ export const addPaycheckSchema = z.object({
 })
 
 export type AddPaycheckInput = z.infer<typeof addPaycheckSchema>
+
+export const addPurchaseSchema = z.object({
+  date: z.string().min(1, 'Date is required'),
+  description: z.string().min(1, 'Description is required'),
+  amount: z.number().positive('Must be greater than 0'),
+})
+
+export type AddPurchaseInput = z.infer<typeof addPurchaseSchema>

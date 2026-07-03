@@ -1,6 +1,6 @@
 import { Link } from 'react-router-dom'
 import { Button } from '@/components/ui/button'
-import { BudgetEnvelopeCard } from '@/components/budget/BudgetEnvelopeCard'
+import { BudgetEnvelopeRow } from '@/components/budget/BudgetEnvelopeRow'
 import { BudgetSummary } from '@/components/budget/BudgetSummary'
 import { IncomeOverview } from '@/components/budget/IncomeOverview'
 import { AddBudgetDialog } from '@/components/budget/AddBudgetDialog'
@@ -38,9 +38,9 @@ export default function BudgetPage() {
         <AddBudgetDialog />
       </div>
 
-      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+      <div className="divide-y rounded-xl border">
         {categories.map((category) => (
-          <BudgetEnvelopeCard
+          <BudgetEnvelopeRow
             key={category.id}
             category={category}
             monthlyTarget={getMonthlyTarget(category, targetContext)}

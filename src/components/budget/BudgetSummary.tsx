@@ -1,15 +1,17 @@
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
-import { cn } from '@/lib/utils'
+import { cn, formatCurrency } from '@/lib/utils'
 import { useBudgetStore } from '@/stores/useBudgetStore'
 import {
   getAveragePaycheckAmount,
   getMonthlyIncome,
   getMonthlyTarget,
 } from '@/lib/income'
+import { getCategorySpent } from '@/lib/purchases'
 
 export function BudgetSummary() {
   const categories = useBudgetStore((state) => state.categories)
   const paychecks = useBudgetStore((state) => state.paychecks)
+  const purchases = useBudgetStore((state) => state.purchases)
   const paychecksPerMonth = useBudgetStore((state) => state.paychecksPerMonth)
 
   const monthlyIncome = getMonthlyIncome(paychecks)
@@ -20,7 +22,10 @@ export function BudgetSummary() {
     (sum, c) => sum + getMonthlyTarget(c, targetContext),
     0
   )
-  const monthlySpent = categories.reduce((sum, c) => sum + c.monthlySpent, 0)
+  const monthlySpent = categories.reduce(
+    (sum, c) => sum + getCategorySpent(purchases, c),
+    0
+  )
   const yearlyBudgeted = monthlyBudgeted * 12
   const yearlySpent = monthlySpent * 12
 
@@ -39,7 +44,7 @@ export function BudgetSummary() {
               monthlySpent > monthlyBudgeted && 'text-destructive'
             )}
           >
-            ${monthlySpent.toLocaleString()}{' '}
+            ${formatCurrency(monthlySpent)}{' '}
             <span className="text-base font-normal text-muted-foreground">
               / ${monthlyBudgeted.toLocaleString(undefined, { maximumFractionDigits: 0 })}
             </span>
@@ -59,7 +64,7 @@ export function BudgetSummary() {
               yearlySpent > yearlyBudgeted && 'text-destructive'
             )}
           >
-            ${yearlySpent.toLocaleString()}{' '}
+            ${formatCurrency(yearlySpent)}{' '}
             <span className="text-base font-normal text-muted-foreground">
               / ${yearlyBudgeted.toLocaleString(undefined, { maximumFractionDigits: 0 })}
             </span>

@@ -6,6 +6,7 @@ import {
   getMonthlyIncome,
   getMonthlyTarget,
 } from '@/lib/income'
+import { getCategorySpent } from '@/lib/purchases'
 
 // No dedicated tax-reserve total exists yet (only this month's contribution
 // to the "Tax Savings" category) — placeholder mock constant until a real
@@ -22,6 +23,7 @@ interface Slice {
 export function MoneyOverviewCard() {
   const categories = useBudgetStore((state) => state.categories)
   const paychecks = useBudgetStore((state) => state.paychecks)
+  const purchases = useBudgetStore((state) => state.purchases)
   const paychecksPerMonth = useBudgetStore((state) => state.paychecksPerMonth)
   const bankBalance = useBudgetStore((state) => state.bankBalance)
 
@@ -33,7 +35,10 @@ export function MoneyOverviewCard() {
     (sum, c) => sum + getMonthlyTarget(c, targetContext),
     0
   )
-  const totalSpent = categories.reduce((sum, c) => sum + c.monthlySpent, 0)
+  const totalSpent = categories.reduce(
+    (sum, c) => sum + getCategorySpent(purchases, c),
+    0
+  )
   const remainingBudget = Math.max(totalBudgeted - totalSpent, 0)
 
   const slices: Slice[] = [
@@ -70,7 +75,7 @@ export function MoneyOverviewCard() {
 
   return (
     <Card className="h-full min-h-[200px]">
-      <CardContent className="flex h-full flex-col items-center text-center">
+      <CardContent className="flex h-full flex-col items-center justify-center text-center">
         <div className="mb-2 flex w-full items-center gap-2">
           <div className="flex size-8 items-center justify-center rounded-lg bg-info/10">
             <PieChart className="size-4 text-info" />

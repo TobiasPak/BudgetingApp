@@ -8,6 +8,8 @@ import {
   getMonthlyIncome,
   getMonthlyTarget,
 } from '@/lib/income'
+import { getCategorySpent } from '@/lib/purchases'
+import { formatCurrency } from '@/lib/utils'
 
 const overBudgetListFormatter = new Intl.ListFormat('en', {
   style: 'long',
@@ -17,6 +19,7 @@ const overBudgetListFormatter = new Intl.ListFormat('en', {
 export default function HomePage() {
   const categories = useBudgetStore((state) => state.categories)
   const paychecks = useBudgetStore((state) => state.paychecks)
+  const purchases = useBudgetStore((state) => state.purchases)
   const paychecksPerMonth = useBudgetStore((state) => state.paychecksPerMonth)
 
   const monthlyIncome = getMonthlyIncome(paychecks)
@@ -27,9 +30,12 @@ export default function HomePage() {
     (sum, c) => sum + getMonthlyTarget(c, targetContext),
     0
   )
-  const totalSpent = categories.reduce((sum, c) => sum + c.monthlySpent, 0)
+  const totalSpent = categories.reduce(
+    (sum, c) => sum + getCategorySpent(purchases, c),
+    0
+  )
   const overCategories = categories.filter((c) =>
-    isOverBudget(c, getMonthlyTarget(c, targetContext))
+    isOverBudget(getCategorySpent(purchases, c), getMonthlyTarget(c, targetContext))
   )
   const onTrackCount = categories.length - overCategories.length
 
@@ -41,11 +47,11 @@ export default function HomePage() {
         } over budget.`
 
   return (
-    <main className="mx-auto max-w-5xl px-4 py-8">
-      <h1 className="mb-6 text-2xl font-semibold tracking-tight">ClearBooks</h1>
+    <main className="flex flex-col gap-4 px-6 py-6 md:h-screen">
+      <h1 className="text-2xl font-semibold tracking-tight">ClearBooks</h1>
 
-      <div className="grid grid-cols-1 gap-3 md:grid-cols-[minmax(160px,1fr)_minmax(260px,1.3fr)_minmax(160px,1fr)]">
-        <div className="flex flex-col gap-3">
+      <div className="grid grid-cols-1 gap-3 md:min-h-0 md:flex-1 md:grid-cols-[minmax(160px,1fr)_minmax(260px,1.3fr)_minmax(160px,1fr)] md:grid-rows-1">
+        <div className="flex flex-col gap-3 md:h-full">
           {/* Mock content — no Spending feature/store built yet. */}
           <DashboardPanel
             icon={Receipt}
@@ -64,7 +70,7 @@ export default function HomePage() {
             label="Budget"
             value={
               <>
-                ${totalSpent.toLocaleString()}{' '}
+                ${formatCurrency(totalSpent)}{' '}
                 <span className="text-sm font-normal text-muted-foreground">
                   / $
                   {totalBudgeted.toLocaleString(undefined, {
@@ -84,7 +90,7 @@ export default function HomePage() {
 
         <MoneyOverviewCard />
 
-        <div className="flex flex-col gap-3">
+        <div className="flex flex-col gap-3 md:h-full">
           {/* Mock content — no Income feature/store built yet. */}
           <DashboardPanel
             icon={Banknote}

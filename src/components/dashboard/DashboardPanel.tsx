@@ -59,7 +59,7 @@ export function DashboardPanel({
   const content = (
     <Card
       className={cn(
-        'h-full min-h-[200px]',
+        'h-full min-h-[200px] md:flex-1',
         href && 'transition-colors hover:border-foreground/20'
       )}
     >
@@ -101,7 +101,7 @@ export function DashboardPanel({
   )
 
   return href ? (
-    <Link to={href} className="block h-full">
+    <Link to={href} className="block h-full md:flex-1">
       {content}
     </Link>
   ) : (

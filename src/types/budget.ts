@@ -15,8 +15,17 @@ interface BudgetCategoryBase {
   // adding persistence/serialization (e.g. Firestore sync).
   icon: LucideIcon
   color: ChartColorToken
-  monthlySpent: number
   isCustom?: boolean
+  // Day of month (1-31) this category's tracking cycle recurs on — see
+  // getCurrentPeriod in src/lib/period.ts. Defaults to 1 (calendar month).
+  //
+  // Spending itself isn't stored here at all — it's derived by summing
+  // this category's Purchase records that fall within its current period
+  // (see getCategorySpent in src/lib/purchases.ts). That also means a
+  // cycle rollover "resets" spending for free: once a purchase's date
+  // falls outside the newly-current period, it just stops counting — no
+  // stored total to manually zero out, unlike the old monthlySpent field.
+  resetDay: number
 }
 
 // A flat dollar target, e.g. "$250/mo for groceries" — same shape as the
