@@ -1,11 +1,16 @@
 import { PieChart } from 'lucide-react'
 import { Card, CardContent } from '@/components/ui/card'
 import { useBudgetStore } from '@/stores/useBudgetStore'
+import {
+  getAveragePaycheckAmount,
+  getMonthlyIncome,
+  getMonthlyTarget,
+} from '@/lib/income'
 
-// No store exists yet for tax/account balances — these are placeholder mock
-// constants until those features are built.
+// No dedicated tax-reserve total exists yet (only this month's contribution
+// to the "Tax Savings" category) — placeholder mock constant until a real
+// running tax-reserve balance is tracked.
 const MOCK_TAX_RESERVE = 1100
-const MOCK_AVAILABLE_BALANCE = 1500
 
 interface Slice {
   label: string
@@ -16,7 +21,18 @@ interface Slice {
 
 export function MoneyOverviewCard() {
   const categories = useBudgetStore((state) => state.categories)
-  const totalBudgeted = categories.reduce((sum, c) => sum + c.monthlyBudgeted, 0)
+  const paychecks = useBudgetStore((state) => state.paychecks)
+  const paychecksPerMonth = useBudgetStore((state) => state.paychecksPerMonth)
+  const bankBalance = useBudgetStore((state) => state.bankBalance)
+
+  const monthlyIncome = getMonthlyIncome(paychecks)
+  const averagePaycheckAmount = getAveragePaycheckAmount(paychecks)
+  const targetContext = { monthlyIncome, averagePaycheckAmount, paychecksPerMonth }
+
+  const totalBudgeted = categories.reduce(
+    (sum, c) => sum + getMonthlyTarget(c, targetContext),
+    0
+  )
   const totalSpent = categories.reduce((sum, c) => sum + c.monthlySpent, 0)
   const remainingBudget = Math.max(totalBudgeted - totalSpent, 0)
 
@@ -36,7 +52,7 @@ export function MoneyOverviewCard() {
     },
     {
       label: 'Available balance',
-      amount: MOCK_AVAILABLE_BALANCE,
+      amount: bankBalance,
       colorVar: 'var(--success)',
       dotClass: 'bg-success',
     },
@@ -80,7 +96,7 @@ export function MoneyOverviewCard() {
               <span className={`size-2 shrink-0 rounded-full ${slice.dotClass}`} />
               <span className="flex-1 text-left text-sm">{slice.label}</span>
               <span className="text-sm font-medium">
-                ${slice.amount.toLocaleString()}
+                ${slice.amount.toLocaleString(undefined, { maximumFractionDigits: 0 })}
               </span>
             </div>
           ))}

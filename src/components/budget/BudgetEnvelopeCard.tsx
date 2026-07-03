@@ -13,8 +13,21 @@ const colorClass: Record<ChartColorToken, string> = {
   'chart-5': 'text-chart-5',
 }
 
-export function BudgetEnvelopeCard({ category }: { category: BudgetCategory }) {
-  const overBudget = isOverBudget(category)
+const basisLabel: Record<'paycheck' | 'monthlyIncome', string> = {
+  paycheck: 'per paycheck',
+  monthlyIncome: 'of monthly income',
+}
+
+interface BudgetEnvelopeCardProps {
+  category: BudgetCategory
+  monthlyTarget: number
+}
+
+export function BudgetEnvelopeCard({
+  category,
+  monthlyTarget,
+}: BudgetEnvelopeCardProps) {
+  const overBudget = isOverBudget(category, monthlyTarget)
   const Icon = category.icon
 
   return (
@@ -30,8 +43,13 @@ export function BudgetEnvelopeCard({ category }: { category: BudgetCategory }) {
         )}
       </CardHeader>
       <CardContent className="space-y-2">
+        {category.type === 'percentage' && (
+          <p className="text-xs text-muted-foreground">
+            {category.percent}% {basisLabel[category.basis]}
+          </p>
+        )}
         <Progress
-          value={progressPercent(category)}
+          value={progressPercent(category, monthlyTarget)}
           className={cn(
             overBudget && '[&_[data-slot=progress-indicator]]:bg-destructive'
           )}
@@ -43,7 +61,7 @@ export function BudgetEnvelopeCard({ category }: { category: BudgetCategory }) {
           )}
         >
           ${category.monthlySpent.toLocaleString()} / $
-          {category.monthlyBudgeted.toLocaleString()}
+          {monthlyTarget.toLocaleString(undefined, { maximumFractionDigits: 0 })}
         </p>
       </CardContent>
     </Card>

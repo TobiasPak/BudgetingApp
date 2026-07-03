@@ -3,6 +3,11 @@ import { DashboardPanel } from '@/components/dashboard/DashboardPanel'
 import { MoneyOverviewCard } from '@/components/dashboard/MoneyOverviewCard'
 import { useBudgetStore } from '@/stores/useBudgetStore'
 import { isOverBudget } from '@/lib/budget'
+import {
+  getAveragePaycheckAmount,
+  getMonthlyIncome,
+  getMonthlyTarget,
+} from '@/lib/income'
 
 const overBudgetListFormatter = new Intl.ListFormat('en', {
   style: 'long',
@@ -11,9 +16,21 @@ const overBudgetListFormatter = new Intl.ListFormat('en', {
 
 export default function HomePage() {
   const categories = useBudgetStore((state) => state.categories)
-  const totalBudgeted = categories.reduce((sum, c) => sum + c.monthlyBudgeted, 0)
+  const paychecks = useBudgetStore((state) => state.paychecks)
+  const paychecksPerMonth = useBudgetStore((state) => state.paychecksPerMonth)
+
+  const monthlyIncome = getMonthlyIncome(paychecks)
+  const averagePaycheckAmount = getAveragePaycheckAmount(paychecks)
+  const targetContext = { monthlyIncome, averagePaycheckAmount, paychecksPerMonth }
+
+  const totalBudgeted = categories.reduce(
+    (sum, c) => sum + getMonthlyTarget(c, targetContext),
+    0
+  )
   const totalSpent = categories.reduce((sum, c) => sum + c.monthlySpent, 0)
-  const overCategories = categories.filter(isOverBudget)
+  const overCategories = categories.filter((c) =>
+    isOverBudget(c, getMonthlyTarget(c, targetContext))
+  )
   const onTrackCount = categories.length - overCategories.length
 
   const budgetInsight =
@@ -49,7 +66,10 @@ export default function HomePage() {
               <>
                 ${totalSpent.toLocaleString()}{' '}
                 <span className="text-sm font-normal text-muted-foreground">
-                  / ${totalBudgeted.toLocaleString()}
+                  / $
+                  {totalBudgeted.toLocaleString(undefined, {
+                    maximumFractionDigits: 0,
+                  })}
                 </span>
               </>
             }

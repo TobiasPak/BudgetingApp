@@ -1,9 +1,10 @@
 import type { BudgetCategory } from '@/types/budget'
 
-export function isOverBudget(category: BudgetCategory) {
-  return category.monthlySpent > category.monthlyBudgeted
+export function isOverBudget(category: BudgetCategory, monthlyTarget: number) {
+  return category.monthlySpent > monthlyTarget
 }
 
-export function progressPercent(category: BudgetCategory) {
-  return Math.min((category.monthlySpent / category.monthlyBudgeted) * 100, 100)
+export function progressPercent(category: BudgetCategory, monthlyTarget: number) {
+  if (monthlyTarget <= 0) return 0
+  return Math.min((category.monthlySpent / monthlyTarget) * 100, 100)
 }

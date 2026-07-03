@@ -47,32 +47,49 @@ what the installed create-vite version ships.
 
 ## Current Status
 
-**First feature built: Budget envelopes + dashboard home. Foundation otherwise unchanged.**
+**Budget envelopes + dashboard home + income tracking. Foundation otherwise unchanged.**
 
 Implemented:
 - Project scaffold (Vite + React 18 + TypeScript), clean `npm install`
-- Routing: `/` (dashboard home), `/budget` (Budget envelopes), `/about` (placeholder)
+- Routing: `/` (dashboard home), `/budget` (Budget envelopes + income), `/about` (placeholder)
 - Tailwind v4 + shadcn/ui wired up (`components.json`, `src/lib/utils.ts`,
-  components: `button`, `card`, `progress`)
+  components: `button`, `card`, `progress`, `dialog`, `input`, `label`, `select`)
 - Semantic color tokens `--success`/`--info`/`--warning` added to
   `src/index.css` (light + dark values) alongside the pre-existing
   `--destructive`, since the installed shadcn Nova theme's `--chart-1..5`
   are grayscale in this preset, not a colorful palette
 - TanStack Query `QueryClientProvider` wired in `src/main.tsx`
-- **`useBudgetStore`** (Zustand) — first real store, seeded with 8 mock
-  budget categories; `updateSpent`/`addCategory` actions available but not
-  yet invoked by any UI
-- **Budget envelopes page** (`/budget`): per-category cards with progress
-  bars and overspend alerts (derived, not stored — see `src/lib/budget.ts`),
-  monthly + yearly (×12 derived) summary
+- **`useBudgetStore`** (Zustand) — first real store. Holds `categories`
+  (`BudgetCategory[]`, a `fixed`/`percentage` discriminated union — see
+  Architecture below), `paychecks` (`Paycheck[]`), `bankBalance`,
+  `paychecksPerMonth`. Actions: `updateSpent`, `addCategory`, `addPaycheck`,
+  `removePaycheck`, `setBankBalance`, `setPaychecksPerMonth`. Seeded with 9
+  mock categories (7 fixed + 2 percentage: Savings 15%-of-income, Tax
+  Savings 12%-per-paycheck) and 2 mock paychecks dated in the current month
+- **Income tracking**: paychecks are the source of truth for income —
+  "money earned this month" is *derived* by summing paychecks dated in the
+  current month (`src/lib/income.ts`), not a separately-typed number, so it
+  can't drift from what's actually logged. Yearly projection = monthly × 12.
+  Percentage-based budgets resolve their dollar target from either
+  `monthlyIncome` (the running sum) or `averagePaycheckAmount ×
+  paychecksPerMonth` (a projection independent of how many paychecks have
+  landed yet this month) — see `getMonthlyTarget` in `src/lib/income.ts`
+- **Budget envelopes page** (`/budget`): `IncomeOverview` (earned this
+  month, projected this year, editable bank balance, this-month paycheck
+  list with remove + an "Add paycheck" dialog), `BudgetSummary`
+  (monthly/yearly totals, ×12 derived), category grid with an "Add budget"
+  dialog (name + fixed-amount-or-percentage, React Hook Form + Zod — the
+  first real form in the app), overspend alerts derived per-category (not
+  stored — see `src/lib/budget.ts`)
 - **Dashboard home** (`/`): 3-column layout — centered "money overview" donut
-  (2 of 4 slices real, derived from `useBudgetStore`; 2 are mock constants)
-  flanked by 4 tall panels (Spending, Budget, Income, Tax). Only the Budget
-  panel is interactive (links to `/budget`); Spending/Income/Tax render full
+  (Spent + Remaining budget derived from `useBudgetStore`; Available balance
+  now real too, from `bankBalance`; Tax reserve remains a mock constant, no
+  running tax-reserve total exists yet) flanked by 4 tall panels (Spending,
+  Budget, Income, Tax). Only the Budget panel is interactive (links to
+  `/budget`) and shows real derived totals; Spending/Income/Tax render full
   mock content (trend arrows, insight lines) but aren't clickable — those
   domains have no store/feature yet
-- React Hook Form, Zod, `@hookform/resolvers`, Recharts still installed as
-  dependencies with documented (not yet used) conventions
+- Recharts still installed as a dependency with a documented (not yet used) convention
 - Firebase client SDK initialized (`src/lib/firebase.ts`) reading
   `VITE_FIREBASE_*` env vars; does not throw with empty/placeholder values
 - Firebase project scaffold: `firebase.json`, `.firebaserc` (placeholder
@@ -83,11 +100,12 @@ Implemented:
   functions yet)
 - Git hygiene: `.gitignore` added, `node_modules` untracked from git
 
-Not yet implemented: authentication, Firestore-backed data (Budget is
-mock/local Zustand state only), Spending/Income/Tax features (dashboard
-panels are static mock content), Plaid/Veryfi/Resend integrations, tax
-engine, real forms, real charts, dark-mode toggle (theme is class-based
-and CSS-ready, but nothing flips the `.dark` class yet).
+Not yet implemented: authentication, Firestore-backed data (everything is
+mock/local Zustand state only — nothing persists across a page reload),
+Spending/Tax features (dashboard panels are static mock content), a running
+tax-reserve balance, Plaid/Veryfi/Resend integrations, tax engine, real
+charts, dark-mode toggle (theme is class-based and CSS-ready, but nothing
+flips the `.dark` class yet).
 
 **Before real use**: a real Firebase project must be created (console or
 `firebase projects:create`) and swapped into `.firebaserc` via
@@ -100,26 +118,35 @@ setup — nothing to deploy yet.
 src/
   assets/          # static images/icons (currently empty — template assets removed)
   components/
-    ui/            # shadcn-generated primitives (button, card, progress)
-    budget/        # Budget feature components (BudgetEnvelopeCard, BudgetSummary)
+    ui/            # shadcn-generated primitives (button, card, progress,
+                    # dialog, input, label, select)
+    budget/        # Budget feature components (BudgetEnvelopeCard, BudgetSummary,
+                    # IncomeOverview, AddBudgetDialog, AddPaycheckDialog)
     dashboard/     # Dashboard home components (DashboardPanel, MoneyOverviewCard)
     charts/        # Recharts wrapper components (future — not the same as
                     # MoneyOverviewCard's donut, which is a hand-rolled CSS
                     # conic-gradient, not Recharts)
   pages/           # route-level components (HomePage = dashboard, BudgetPage, AboutPage)
   stores/          # Zustand stores, one file per domain, named use<Domain>Store.ts
-                    # (useBudgetStore.ts is the first one)
+                    # (useBudgetStore.ts is the first one — categories, paychecks,
+                    # bankBalance, paychecksPerMonth all live here)
   lib/
     firebase.ts    # Firebase SDK init: `app`, `db` eager; `getFirebaseAuth()` lazy
                     # (getAuth() throws eagerly on missing/invalid API key, unlike
                     # getFirestore() — call getFirebaseAuth() only where auth is used)
     utils.ts       # shadcn cn() helper
-    budget.ts      # derived budget helpers (isOverBudget, progressPercent) —
-                    # kept out of the store so nothing can drift out of sync
-    schemas/        # Zod schemas for forms
+    budget.ts      # derived budget helpers (isOverBudget, progressPercent) — take
+                    # an already-computed monthlyTarget, don't compute it themselves
+    income.ts      # derived income helpers (getMonthlyIncome, getYearlyProjectedIncome,
+                    # getAveragePaycheckAmount, getMonthlyTarget — resolves a
+                    # BudgetCategory's dollar target from income context)
+    schemas/
+      budget.ts    # Zod schemas: addBudgetSchema, addPaycheckSchema
   hooks/           # custom hooks incl. TanStack Query hooks (created on first use)
   types/
-    budget.ts      # BudgetCategory, ChartColorToken
+    budget.ts      # BudgetCategory (fixed | percentage discriminated union),
+                    # ChartColorToken, DistributiveOmit utility
+    paycheck.ts    # Paycheck (id, amount, date as ISO "YYYY-MM-DD" string)
   vite-env.d.ts    # ImportMetaEnv typing for VITE_FIREBASE_* vars
 
 functions/
@@ -128,12 +155,18 @@ functions/
 
 Conventions:
 - Zustand stores: `src/stores/`, one file per domain slice, `use<Domain>Store.ts`
-- Derived/computed values (e.g. overspend, progress %) live in `src/lib/`,
-  not as extra fields on the store — avoids stored state drifting from the
-  raw numbers it's computed from
+- Derived/computed values (e.g. overspend, progress %, monthly income,
+  a percentage-budget's dollar target) live in `src/lib/`, not as extra
+  fields on the store — avoids stored state drifting from the raw numbers
+  it's computed from
 - TanStack Query hooks: `src/hooks/`, colocated with the feature that uses them
 - Form schemas: `src/lib/schemas/` (Zod); forms use React Hook Form +
-  `@hookform/resolvers/zod`
+  `@hookform/resolvers/zod`. For a schema representing "one of several
+  shapes based on a discriminant field" (e.g. fixed vs. percentage budget),
+  prefer a **flat Zod object + `.superRefine()`** over `z.discriminatedUnion`
+  — React Hook Form's `register`/`errors`/`watch` generics don't work
+  cleanly against a union type (see `addBudgetSchema` in
+  `src/lib/schemas/budget.ts`)
 - Chart components: `src/components/charts/` (Recharts wrappers)
 - Feature-specific component groupings: `src/components/<feature>/`
   (e.g. `budget/`, `dashboard/`) — `components/ui/` is reserved for
@@ -154,6 +187,22 @@ Conventions:
   generates `text-*`/`bg-*`/`border-*` utilities. Use these for meaning
   (status, category identity) rather than `--chart-1..5`, which are
   grayscale in the installed Nova preset.
+- **shadcn primitives generated by this project's CLI/registry version are
+  NOT wrapped in `React.forwardRef` by default** — `Button`, `Input`,
+  `DialogOverlay`, and `DialogContent` all needed a manual `forwardRef` fix
+  (see Session Log below for why this matters — it silently broke
+  `DialogTrigger asChild` composition and React Hook Form's uncontrolled-
+  field `defaultValues`/`reset()`). `Label` and the `Card` subcomponents
+  have the same latent gap but aren't currently ref'd by anything, so they
+  weren't fixed speculatively. **If a future component needs to attach a
+  ref to a local shadcn wrapper (not a bare Radix primitive), check first
+  whether it's `forwardRef`-wrapped and fix it if not**, following the
+  pattern in `src/components/ui/button.tsx`.
+- React Hook Form's `useForm` forms with conditionally-rendered fields (e.g. a
+  fixed-vs-percentage type switch) **must** pass `shouldUnregister: true`
+  to `useForm()` — otherwise a field's stale value survives after its input
+  unmounts and can fail Zod validation for a branch that's no longer active
+  (see `AddBudgetDialog.tsx`)
 - Cloud Functions live in `functions/` — separate `package.json`/`tsconfig.json`,
   own dependency tree (`firebase-admin`, `firebase-functions`)
 - Client env vars: only `VITE_FIREBASE_*` (see `.env.example`). Plaid/Veryfi/Resend
@@ -251,3 +300,87 @@ above so it always reflects the real state of the repo.
   (dispatching `.click()` via `preview_eval` worked immediately) — likely
   a tool-level event quirk, not an app bug, since manual `.click()`
   navigated correctly both directions.
+
+### 2026-07-03 — Income tracking + configurable budgets
+- User asked for the Budget screen to show money earned this month,
+  projected yearly income, bank balance, and to support adding different
+  kinds of budgets (percentage-of-paycheck, fixed amounts, tax savings)
+  that calculate their own monthly savings target and track spend against
+  it. Clarified up front: income comes from itemized paychecks (summed,
+  not a manually-typed total), percentage budgets pick their basis
+  (per-paycheck vs. monthly income) per-category, and "add budget" is a
+  dialog form.
+- Redesigned `BudgetCategory` (`src/types/budget.ts`) from a flat interface
+  to a `fixed | percentage` discriminated union; added `Paycheck`
+  (`src/types/paycheck.ts`) and a `DistributiveOmit<T, K>` utility (plain
+  `Omit` over a union only keeps keys common to every member — needed a
+  distributive version for `addCategory`'s parameter type).
+- Added `src/lib/income.ts`: `getMonthlyIncome`/`getCurrentMonthPaychecks`
+  (careful to compare date strings' own Y/M components rather than
+  `new Date(dateStr)`, which parses as UTC midnight and can shift a day in
+  negative-offset timezones), `getYearlyProjectedIncome` (× 12, same
+  derived-not-stored pattern as the existing monthly→yearly budget
+  numbers), `getAveragePaycheckAmount` (averaged over *all* paychecks ever,
+  not just this month's, so a "per paycheck" percentage budget still has a
+  meaningful projected target early in the month before any paycheck has
+  landed yet), `getMonthlyTarget` (resolves a category's dollar target from
+  income context — this is what lets percentage budgets stay derived rather
+  than storing a dollar amount that could drift from the actual rule).
+- Extended `useBudgetStore`: `paychecks`, `bankBalance`, `paychecksPerMonth`
+  state; `addPaycheck`/`removePaycheck`/`setBankBalance`/
+  `setPaychecksPerMonth` actions. Re-seeded categories in the new
+  fixed/percentage shape (Savings → 15% of monthly income, added a new Tax
+  Savings category → 12% per paycheck, matching the user's own example).
+- Built the first real forms in the app: `AddBudgetDialog` and
+  `AddPaycheckDialog` (React Hook Form + Zod + shadcn `Dialog`/`Select`).
+  Added shadcn `dialog`, `input`, `label`, `select`. Built `IncomeOverview`
+  (earned this month, projected this year, editable bank balance, this-
+  month paycheck list with remove buttons, "Add paycheck" trigger) and
+  wired both dialogs + `IncomeOverview` into `BudgetPage`.
+- **Two real, non-obvious bugs found and fixed during verification**
+  (both are now documented as standing conventions above, not just one-off
+  fixes):
+  1. This project's installed shadcn primitives (`Button`, `Input`,
+     `DialogOverlay`, `DialogContent`) are plain function components, not
+     wrapped in `React.forwardRef`. This silently broke two things:
+     `DialogTrigger asChild` wrapping a `Button` couldn't attach its ref
+     (React warning, and contributed to Radix's Presence/dismissable-layer
+     tracking behaving inconsistently), and React Hook Form's `register()`
+     couldn't attach its ref to `Input`, so **uncontrolled-field
+     `defaultValues` silently never applied** (a date field meant to
+     default to today stayed empty). Fixed by wrapping all four in
+     `React.forwardRef`, matching what modern shadcn actually generates.
+  2. `AddBudgetDialog`'s conditionally-rendered `monthlyAmount` field (only
+     shown when type is "fixed") left a stale value behind in React Hook
+     Form's internal state after switching to "percentage" and unmounting
+     it, because `shouldUnregister` defaults to `false`. That stale value
+     was `NaN` (an empty string run through `valueAsNumber`), and Zod's
+     `.optional()` only tolerates `undefined`, not `NaN` — so submitting a
+     percentage budget failed base-schema validation on a field that
+     wasn't even visible, independent of the category's actual `type`.
+     Fixed with `shouldUnregister: true` on `useForm()`.
+  - Diagnosing bug #2 required bypassing `console.log`/`preview_console_logs`
+    entirely partway through — that tool's log buffer accumulates for the
+    whole session and never clears/ages out, so "is this error from my
+    latest change or five reloads ago" was impossible to answer from logs
+    alone. Switched to writing state directly onto `window.__debugX` and
+    reading it back synchronously in the same `preview_eval` call, which
+    gave a reliable answer. Worth remembering for future browser-based
+    debugging in this environment: prefer `window`-variable handoff over
+    console-log inspection when call-to-call ordering matters.
+  - Also noticed: separate `preview_eval` calls in a row against an
+    open Radix `Dialog` sometimes caused it to close between calls
+    (plausibly a focus-change side effect of how the tool executes JS
+    being interpreted as an "outside click" by Radix's dismissable layer).
+    Doing an entire multi-step interaction (open → fill → select → submit)
+    inside one `async` `preview_eval` call with small `setTimeout` waits
+    between steps was reliable; splitting the same steps across multiple
+    tool calls was not.
+- Verified end-to-end via the dev server: added both a percentage category
+  (Vacation Fund, 5% of monthly income → correctly computed $260 target
+  off $5,200 income) and a fixed category (Emergency Fund, $200), each
+  correctly folding into the monthly/yearly summary totals; added and
+  removed a paycheck and confirmed "earned this month"/"projected this
+  year"/every percentage-budget target recalculated correctly; confirmed
+  the dashboard's Budget panel and money-overview donut pick up the same
+  real totals. `tsc -b`, `npm run lint`, `npm run build` all clean.
