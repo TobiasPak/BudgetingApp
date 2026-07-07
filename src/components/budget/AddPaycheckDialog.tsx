@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { useForm } from 'react-hook-form'
+import { useForm, Controller } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { Plus } from 'lucide-react'
 import { Button } from '@/components/ui/button'
@@ -14,8 +14,18 @@ import {
 } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
 import { useBudgetStore } from '@/stores/useBudgetStore'
-import { addPaycheckSchema, type AddPaycheckInput } from '@/lib/schemas/budget'
+import {
+  addPaycheckWithSourceSchema,
+  type AddPaycheckWithSourceInput,
+} from '@/lib/schemas/income'
 import { defaultDateForReference } from '@/lib/period'
 
 interface AddPaycheckDialogProps {
@@ -24,21 +34,29 @@ interface AddPaycheckDialogProps {
 
 export function AddPaycheckDialog({ referenceDate }: AddPaycheckDialogProps) {
   const [open, setOpen] = useState(false)
+  const incomeSources = useBudgetStore((state) => state.incomeSources)
   const addPaycheck = useBudgetStore((state) => state.addPaycheck)
 
   const {
     register,
     handleSubmit,
+    control,
     reset,
     formState: { errors },
-  } = useForm<AddPaycheckInput>({
-    resolver: zodResolver(addPaycheckSchema),
-    defaultValues: { date: defaultDateForReference(referenceDate) },
+  } = useForm<AddPaycheckWithSourceInput>({
+    resolver: zodResolver(addPaycheckWithSourceSchema),
+    defaultValues: {
+      date: defaultDateForReference(referenceDate),
+      sourceId: incomeSources[0]?.id,
+    },
   })
 
-  function onSubmit(data: AddPaycheckInput) {
+  function onSubmit(data: AddPaycheckWithSourceInput) {
     addPaycheck(data)
-    reset({ date: defaultDateForReference(referenceDate) })
+    reset({
+      date: defaultDateForReference(referenceDate),
+      sourceId: incomeSources[0]?.id,
+    })
     setOpen(false)
   }
 
@@ -82,6 +100,31 @@ export function AddPaycheckDialog({ referenceDate }: AddPaycheckDialogProps) {
             />
             {errors.date && (
               <p className="text-xs text-destructive">{errors.date.message}</p>
+            )}
+          </div>
+
+          <div className="space-y-1.5">
+            <Label htmlFor="sourceId">Source</Label>
+            <Controller
+              name="sourceId"
+              control={control}
+              render={({ field }) => (
+                <Select value={field.value ?? ''} onValueChange={field.onChange}>
+                  <SelectTrigger id="sourceId" className="w-full">
+                    <SelectValue placeholder="Choose a source" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {incomeSources.map((source) => (
+                      <SelectItem key={source.id} value={source.id}>
+                        {source.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              )}
+            />
+            {errors.sourceId && (
+              <p className="text-xs text-destructive">{errors.sourceId.message}</p>
             )}
           </div>
 

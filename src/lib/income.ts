@@ -30,6 +30,29 @@ export function getYearlyProjectedIncome(monthlyIncome: number): number {
   return monthlyIncome * 12
 }
 
+// This source's paychecks within the month containing `reference`, most
+// recent first — same derived-not-stored pattern as getCategoryPurchases.
+export function getSourcePaychecks(
+  paychecks: Paycheck[],
+  sourceId: string,
+  reference: Date = new Date()
+): Paycheck[] {
+  return getCurrentMonthPaychecks(paychecks, reference)
+    .filter((p) => p.sourceId === sourceId)
+    .sort((a, b) => (a.date < b.date ? 1 : -1))
+}
+
+export function getSourceMonthlyIncome(
+  paychecks: Paycheck[],
+  sourceId: string,
+  reference: Date = new Date()
+): number {
+  return getSourcePaychecks(paychecks, sourceId, reference).reduce(
+    (sum, p) => sum + p.amount,
+    0
+  )
+}
+
 // Averaged over ALL paychecks ever logged, not just this month's — using
 // only this month's paychecks would give 0 early in the month (before any
 // paycheck has landed yet), which would zero out any "per paycheck"

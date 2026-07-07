@@ -47,11 +47,11 @@ what the installed create-vite version ships.
 
 ## Current Status
 
-**Budget envelopes + dashboard home + income tracking + month/year ledger navigation. Foundation otherwise unchanged.**
+**Budget envelopes + dashboard home + income tracking + month/year ledger navigation + spending screen + income screen. Foundation otherwise unchanged.**
 
 Implemented:
 - Project scaffold (Vite + React 18 + TypeScript), clean `npm install`
-- Routing: `/` (dashboard home), `/budget` (Budget envelopes + income), `/about` (placeholder)
+- Routing: `/` (dashboard home), `/budget` (Budget envelopes + income), `/spending` (Spending screen), `/income` (Income screen), `/about` (placeholder)
 - Tailwind v4 + shadcn/ui wired up (`components.json`, `src/lib/utils.ts`,
   components: `button`, `card`, `progress`, `dialog`, `input`, `label`, `select`)
 - Semantic color tokens `--success`/`--info`/`--warning` added to
@@ -61,13 +61,17 @@ Implemented:
 - TanStack Query `QueryClientProvider` wired in `src/main.tsx`
 - **`useBudgetStore`** (Zustand) — first real store. Holds `categories`
   (`BudgetCategory[]`, a `fixed`/`percentage` discriminated union — see
-  Architecture below), `paychecks` (`Paycheck[]`), `purchases`
-  (`Purchase[]`), `bankBalance`, `paychecksPerMonth`. Actions: `addCategory`,
+  Architecture below), `incomeSources` (`IncomeSource[]`), `paychecks`
+  (`Paycheck[]`), `purchases` (`Purchase[]`), `bankBalance`,
+  `paychecksPerMonth`. Actions: `addCategory`, `addIncomeSource`,
   `addPaycheck`, `removePaycheck`, `addPurchase`, `removePurchase`,
   `setBankBalance`, `setPaychecksPerMonth`. Seeded with 9 mock categories (7
   fixed + 2 percentage: Savings 15%-of-income, Tax Savings 12%-per-paycheck),
-  2 mock paychecks, and ~19 itemized mock purchases (all dated in the
-  current month)
+  5 mock income sources (W-2 Job, Freelance, Uber, DoorDash, Airbnb — matching
+  the app's stated hybrid-worker scope), 6 mock paychecks spread across those
+  sources (DoorDash seeded with none, exercising the "$0 sources filtered
+  out" path), and ~19 itemized mock purchases (all dated in the current
+  month)
 - **Income tracking**: paychecks are the source of truth for income —
   "money earned this month" is *derived* by summing paychecks dated in the
   current month (`src/lib/income.ts`), not a separately-typed number, so it
@@ -142,11 +146,68 @@ Implemented:
   Remaining budget derived from `useBudgetStore`; Available balance now
   real too, from `bankBalance`; Tax reserve remains a mock constant, no
   running tax-reserve total exists yet) flanked by 4 tall panels (Spending,
-  Budget, Income, Tax). Only the Budget panel is interactive (links to
-  `/budget`) and shows real derived totals; Spending/Income/Tax render full
-  mock content (trend arrows, insight lines) but aren't clickable — those
-  domains have no store/feature yet
-- Recharts still installed as a dependency with a documented (not yet used) convention
+  Budget, Income, Tax). Spending, Budget, and Income panels are all
+  interactive (link to `/spending`, `/budget`, `/income` respectively) and
+  show real derived totals; Tax still renders full mock content (trend
+  arrows, insight lines) but isn't clickable — that domain has no
+  store/feature yet
+- **Spending screen** (`/spending`): mirrors the Budget page's shell — same
+  `MonthYearPicker` reused as-is for past-month history, no separate
+  "spending period" concept introduced. Two clickable stat cards (`Monthly
+  Spent`, `Yearly Spent` — yearly is `monthlySpent × 12`, the same
+  derived-not-stored pattern used everywhere else) drive a
+  `SpendingPieChart` below, matching the existing
+  card-selects-metric-drives-chart-below pattern from
+  `BudgetSummary`/`CategoryBreakdownBar`. `getTotalSpent` (`src/lib/spending.ts`)
+  sums every category's `getCategorySpent` for the viewed period — spending
+  itself was already derived from `Purchase` records, so this page adds no
+  new state, just a new lens (total-across-categories instead of
+  per-category-vs-budget) on data that already existed. Dashboard's
+  Spending panel now shows real `$spent / $income` and a "top spending
+  category" insight instead of the old hardcoded mock content
+- **First real Recharts usage**: `SpendingPieChart`
+  (`src/components/spending/SpendingPieChart.tsx`) is a donut chart +
+  legend, Recharts finally used for something after being an installed-but-
+  unused dependency since the initial scaffold. Segment colors reuse the
+  same `--category-1..5` tokens `CategoryBreakdownBar` already established
+  for category-identity coloring, but passed to Recharts as
+  `var(--color-category-1..5)` (the Tailwind-registered CSS var, not the
+  raw `--category-1..5` one) — the standard shadcn/Recharts charting
+  convention, confirmed to actually resolve correctly through Recharts'
+  SVG `fill` in both light and dark mode via the preview tools (not just
+  assumed). Kept in `components/spending/`, not `components/charts/` —
+  same reasoning as `CategoryBreakdownBar` living in `components/budget/`:
+  it's tightly coupled to the categories/purchases data shape, not a
+  generic reusable wrapper, so `components/charts/` remains reserved for a
+  true general-purpose Recharts wrapper if one is ever needed
+- **Income screen** (`/income`): categorizes paychecks by `IncomeSource`
+  (`src/types/incomeSource.ts` — same icon/color/isCustom shape as
+  `BudgetCategoryBase`, but no `resetDay`/target since a source is a pure
+  categorization label, not something to track spend-against). `Paycheck`
+  gained a required `sourceId` field, so every paycheck — however it's
+  added — now belongs to a source; `AddPaycheckDialog` (Budget page) grew a
+  required Source `Select` to match. Page mirrors the Budget/Spending
+  shell: `MonthYearPicker` for history, `IncomeSummary` (2 clickable cards —
+  Earned This Month / Projected This Year — driving `IncomeSourcesPieChart`
+  below, same card-selects-metric pattern as `BudgetSummary`/
+  `SpendingSummary`), then a `divide-y` list of `IncomeSourceRow`s (mirrors
+  `BudgetEnvelopeRow`: icon/name, a `Progress` bar filled to that source's
+  % of monthly income, $ amount + percent on the right). Clicking a row
+  expands `IncomeSourcePaychecks` inline (mirrors `CategoryPurchases`) —
+  that source's paychecks this period with remove buttons, plus a small
+  add-paycheck form (date + amount only; `sourceId` comes from the row, not
+  user input, so it reuses the base `addPaycheckSchema` rather than the
+  dialog's source-including variant). `AddIncomeSourceDialog` (mirrors
+  `AddBudgetDialog`, simplified to a name field only) creates new sources.
+  `src/lib/income.ts` gained `getSourcePaychecks`/`getSourceMonthlyIncome`
+  (a source's paychecks/total for the month containing a reference date —
+  same derived-not-stored, reference-date-aware pattern as everything
+  else). Dashboard's Income panel now shows real `$earned / $projected`
+  and a "top income source" insight instead of the old hardcoded mock
+  content; its progress bar shows the top source's share of income
+  (a real, defensible metric — income has no "budget ceiling" to show
+  progress against the way Budget/Spending panels do, so this reuses
+  source concentration instead of inventing an arbitrary number)
 - Firebase client SDK initialized (`src/lib/firebase.ts`) reading
   `VITE_FIREBASE_*` env vars; does not throw with empty/placeholder values
 - Firebase project scaffold: `firebase.json`, `.firebaserc` (placeholder
@@ -159,9 +220,9 @@ Implemented:
 
 Not yet implemented: authentication, Firestore-backed data (everything is
 mock/local Zustand state only — nothing persists across a page reload),
-Spending/Tax features (dashboard panels are static mock content), a running
-tax-reserve balance, Plaid/Veryfi/Resend integrations, tax engine, real
-charts, dark-mode toggle (theme is class-based and CSS-ready, but nothing
+Tax feature (dashboard panel is static mock content), a running
+tax-reserve balance, Plaid/Veryfi/Resend integrations, tax engine,
+dark-mode toggle (theme is class-based and CSS-ready, but nothing
 flips the `.dark` class yet).
 
 **Before real use**: a real Firebase project must be created (console or
@@ -183,14 +244,29 @@ src/
                     # MonthYearPicker — prev/next + popover month/year selector,
                     # CategoryBreakdownBar — stacked bar + legend driven by
                     # BudgetSummary's 3 clickable metric cards)
+    spending/      # Spending feature components (SpendingSummary — 2 clickable
+                    # metric cards driving SpendingPieChart below, same pattern as
+                    # BudgetSummary/CategoryBreakdownBar; SpendingPieChart — first
+                    # real Recharts usage in the app, a donut + legend)
+    income/        # Income feature components (IncomeSummary — 2 clickable metric
+                    # cards driving IncomeSourcesPieChart, same pattern as
+                    # SpendingSummary; IncomeSourceRow — log-row list item mirroring
+                    # BudgetEnvelopeRow; IncomeSourcePaychecks — expand-on-click
+                    # paycheck log/add form mirroring CategoryPurchases;
+                    # AddIncomeSourceDialog — mirrors AddBudgetDialog)
     dashboard/     # Dashboard home components (DashboardPanel, MoneyOverviewCard)
-    charts/        # Recharts wrapper components (future — not the same as
-                    # MoneyOverviewCard's donut, which is a hand-rolled CSS
-                    # conic-gradient, not Recharts)
-  pages/           # route-level components (HomePage = dashboard, BudgetPage, AboutPage)
+    charts/        # Recharts wrapper components (still empty/future — not the
+                    # same as MoneyOverviewCard's donut, which is a hand-rolled CSS
+                    # conic-gradient, not Recharts; also not the same as
+                    # SpendingPieChart, which is real Recharts but feature-specific
+                    # so it lives in components/spending/ instead, same reasoning
+                    # as CategoryBreakdownBar living in components/budget/)
+  pages/           # route-level components (HomePage = dashboard, BudgetPage,
+                    # SpendingPage, IncomePage, AboutPage)
   stores/          # Zustand stores, one file per domain, named use<Domain>Store.ts
-                    # (useBudgetStore.ts is the first one — categories, paychecks,
-                    # purchases, bankBalance, paychecksPerMonth all live here)
+                    # (useBudgetStore.ts is the first one — categories,
+                    # incomeSources, paychecks, purchases, bankBalance,
+                    # paychecksPerMonth all live here)
   lib/
     firebase.ts    # Firebase SDK init: `app`, `db` eager; `getFirebaseAuth()` lazy
                     # (getAuth() throws eagerly on missing/invalid API key, unlike
@@ -201,10 +277,15 @@ src/
                     # plain `spent`/`monthlyTarget` numbers, not a category object
     income.ts      # derived income helpers (getMonthlyIncome, getYearlyProjectedIncome,
                     # getAveragePaycheckAmount, getMonthlyTarget — resolves a
-                    # BudgetCategory's dollar target from income context)
+                    # BudgetCategory's dollar target from income context;
+                    # getSourcePaychecks/getSourceMonthlyIncome — a single
+                    # IncomeSource's paychecks/total for a given month)
     purchases.ts   # derived spending helpers (getCategoryPurchases, getCategorySpent) —
                     # a category's spend is summed from Purchase records filtered to
                     # its current period, never stored directly
+    spending.ts    # getTotalSpent — sums getCategorySpent across every category for
+                    # a total-spend view; no new state, just a different lens on the
+                    # same Purchase records purchases.ts already derives from
     period.ts      # recurring reset-cycle date math (getCurrentPeriod,
                     # formatPeriodRange) — a category's resetDay (1-31) maps to
                     # a current start/end date range; day-clamped for short months.
@@ -213,11 +294,19 @@ src/
                     # both AddPaycheckDialog and CategoryPurchases
     schemas/
       budget.ts    # Zod schemas: addBudgetSchema, addPaycheckSchema, addPurchaseSchema
+      income.ts    # addIncomeSourceSchema; addPaycheckWithSourceSchema — extends
+                    # budget.ts's base addPaycheckSchema with a required sourceId,
+                    # used only by the standalone AddPaycheckDialog (not
+                    # IncomeSourcePaychecks's row-scoped form, which already knows
+                    # its sourceId from the expanded row)
   hooks/           # custom hooks incl. TanStack Query hooks (created on first use)
   types/
     budget.ts      # BudgetCategory (fixed | percentage discriminated union,
                     # each with resetDay), ChartColorToken, DistributiveOmit utility
-    paycheck.ts    # Paycheck (id, amount, date as ISO "YYYY-MM-DD" string)
+    incomeSource.ts # IncomeSource (id, name, icon, color, isCustom?) — a Paycheck's
+                    # categorization label, no resetDay/target unlike BudgetCategory
+    paycheck.ts    # Paycheck (id, amount, date as ISO "YYYY-MM-DD" string, sourceId
+                    # referencing an IncomeSource)
     purchase.ts    # Purchase (id, categoryId, date, description, amount)
   vite-env.d.ts    # ImportMetaEnv typing for VITE_FIREBASE_* vars
 
@@ -776,3 +865,161 @@ unique findings, not the standard checklist.
 - Added a pointer in this section's process note directing future
   sessions to the `clearbooks-verify` skill instead of re-describing the
   verification procedure inline going forward.
+
+### 2026-07-06 — Spending screen + first real Recharts chart
+- User asked for a Spending screen reachable from the dashboard's Spending
+  panel (previously mock-only, like Income/Tax), showing Monthly/Yearly
+  Spent, each category's percentage of that total, past-month history, and
+  a pie-chart visual. Deliberately did not introduce a new "spending
+  period" concept or new store state — spend was already fully derived
+  from `Purchase` records (`getCategorySpent`), so this feature is a new
+  *view* over existing data, not new data.
+- Added `getTotalSpent` (`src/lib/spending.ts`) — sums `getCategorySpent`
+  across every category for a reference date, reusing the same
+  reference-date-defaults-to-now pattern as the rest of the app so it
+  works unchanged with `MonthYearPicker`.
+- Built `SpendingPage` (`/spending`) by directly reusing `MonthYearPicker`
+  from `components/budget/` rather than duplicating it — it was already
+  generic (just a `value`/`onChange` date control), so "past history of
+  spending" came for free.
+- Built `SpendingSummary` (2 clickable cards: Monthly Spent, Yearly Spent
+  = monthly × 12) and `SpendingPieChart`, copying the exact
+  card-selects-metric-drives-chart-below interaction `BudgetSummary` +
+  `CategoryBreakdownBar` already established, just swapped the stacked bar
+  for a donut chart per the user's ask, and swapped "% of budget/income"
+  for "% of total spending" (this screen has no budget-adherence framing,
+  just a spending lens).
+- **This is the app's first real Recharts usage** — it's been an installed
+  dependency with a "not yet used" note since the initial scaffold.
+  Colors reuse the existing `--category-1..5` tokens (same ones
+  `CategoryBreakdownBar` already established for category-identity
+  coloring) but passed to Recharts' `Cell fill` as
+  `var(--color-category-1..5)` — the Tailwind-registered variable, not the
+  raw one — matching the standard shadcn/Recharts charting convention.
+  Verified via the preview tools (not just assumed) that this actually
+  resolves to real distinct colors through Recharts' SVG rendering in both
+  light and dark mode, since CSS-var-in-SVG-fill support was the part most
+  likely to silently fail.
+- Hit the same Recharts `Tooltip` `formatter` typing friction documented
+  nowhere before now: typing the callback's `value`/`name` params
+  explicitly (`(value: number, name: string) => ...`) fails because
+  Recharts' `Formatter<ValueType, NameType>` allows `value` to be
+  `undefined`. Fixed by leaving the params untyped and casting inside the
+  body (`Number(value)`, `String(name)`) instead — worth knowing for any
+  future Recharts `Tooltip` usage in this app.
+- Updated `HomePage`'s Spending panel from static mock content to real
+  derived data (`$spent / $income`, percent-of-income progress bar, a
+  "top spending category" insight) and made it a real link to `/spending`,
+  matching how the Budget panel was already wired to `/budget`.
+- Placed `SpendingPieChart` in `components/spending/`, not
+  `components/charts/` — same reasoning already established for
+  `CategoryBreakdownBar` living in `components/budget/` rather than
+  `components/charts/`: it's tightly coupled to the categories/purchases
+  data shape, not a generic reusable wrapper. `components/charts/` remains
+  empty, reserved for a true general-purpose Recharts wrapper if one is
+  ever needed.
+- Verified end-to-end (see `clearbooks-verify` skill): all 9 seeded
+  categories render in the pie chart + legend with percentages summing to
+  100% and dollar amounts matching existing mock totals exactly; clicking
+  "Yearly Spent" correctly recalculated every legend amount to exactly
+  12× the monthly figure while percentages stayed identical; navigating to
+  June 2026 (no mock data) correctly zeroed both stat cards to $0.00 and
+  swapped in the "No spending logged for this period yet" empty state
+  instead of a broken/empty chart; "Back to current" correctly restored
+  July 2026. Dark mode read correctly, including chart segment colors
+  against the dark background. `tsc -b`, `oxlint`, and `vite build` all
+  clean for these changes.
+
+### 2026-07-06 — Income screen (categorized income sources + pie chart)
+- User asked for an Income screen wired to the dashboard's Income panel the
+  same way Budget/Spending already are: show all income sources, let them
+  be categorized, show total income this month/this year plus past-month
+  history, and show each source's percentage of income makeup with a
+  visual. Explicitly scoped to front-end only for now (no cross-screen data
+  wiring beyond what already exists via the shared store).
+- The categorization ask meant `Paycheck` itself needed a category, not
+  just a new page over existing data (unlike the Spending screen, which was
+  a pure new lens on data that already existed). Added `IncomeSource`
+  (`src/types/incomeSource.ts` — id/name/icon/color/isCustom, same shape as
+  `BudgetCategoryBase` minus `resetDay`, since a source has no reset
+  cycle/target to track spend-against) and gave `Paycheck` a required
+  `sourceId`. Because `Paycheck` is a single shared ledger type already used
+  by the Budget page's `AddPaycheckDialog`, making `sourceId` required
+  (rather than optional) meant that dialog needed a Source `Select` added
+  too — every paycheck, however it's added, now belongs to a source.
+- Seeded `useBudgetStore` with 5 income sources (W-2 Job, Freelance, Uber,
+  DoorDash, Airbnb — pulled directly from the app's stated hybrid-worker
+  scope in Project Overview) and reassigned/added mock paychecks across them
+  (W-2 kept its original 2×$2,600; added Freelance $800, Uber $150+$180,
+  Airbnb $650; DoorDash deliberately seeded with zero paychecks to exercise
+  the same "$0 sources filtered out of the breakdown" path
+  `CategoryBreakdownBar`/`SpendingPieChart` already established). This
+  changed the mock "money earned this month" total from $5,200 to $6,980 and
+  therefore every percentage-of-income budget target and dashboard figure
+  derived from it — an intentional side effect of making previously-flat
+  mock income data actually categorized and multi-source, not a bug.
+- Added `getSourcePaychecks`/`getSourceMonthlyIncome` to `src/lib/income.ts`
+  (a source's paychecks/total for the month containing a reference date —
+  same reference-date-defaults-to-now, derived-not-stored pattern as every
+  other helper in that file).
+- Built the Income screen by mirroring established patterns exactly rather
+  than inventing new ones: `IncomePage` reuses `MonthYearPicker` as-is (same
+  as Spending did); `IncomeSummary` (2 clickable cards, Earned This Month /
+  Projected This Year) + `IncomeSourcesPieChart` copy the
+  card-selects-metric-drives-chart-below interaction and Recharts donut
+  approach from `SpendingSummary`/`SpendingPieChart` almost verbatim, swapping
+  "% of spending" for "% of income"; `IncomeSourceRow` mirrors
+  `BudgetEnvelopeRow` (icon/name, a `Progress` bar, $ + % on the right,
+  chevron-toggle expand) but drops the reset-cycle date range and
+  over-budget styling, since a source has no target to be "over"; expanding
+  a row renders `IncomeSourcePaychecks`, mirroring `CategoryPurchases`
+  (inline paycheck list + small add form, `sourceId` supplied by the row
+  rather than user input, same re-`reset()`-on-`referenceDate`-change fix
+  `CategoryPurchases` already needed for the same mount-persists-across-
+  month-navigation reason); `AddIncomeSourceDialog` mirrors `AddBudgetDialog`
+  reduced to just a name field (icon fixed to a generic `Banknote`, color
+  cycled through the same 5 chart tokens).
+- Split paycheck-related Zod schemas across two files rather than
+  overloading `budget.ts` further: kept the original amount+date-only
+  `addPaycheckSchema` there (used by `IncomeSourcePaychecks`'s row-scoped
+  form, which doesn't need `sourceId` as user input), and added a new
+  `src/lib/schemas/income.ts` with `addIncomeSourceSchema` and
+  `addPaycheckWithSourceSchema` (extends the base schema with a required
+  `sourceId`, used only by the standalone `AddPaycheckDialog`).
+- Updated `HomePage`'s Income panel from static mock content to real derived
+  data. Unlike Budget/Spending, income has no natural "vs. a ceiling" ratio
+  for the panel's progress bar (there's no budget to be under/over) — rather
+  than inventing an arbitrary number, reused the top income source's share
+  of this month's income as the progress value, paired with an insight line
+  naming that source and its percentage. Made the panel a real link to
+  `/income`, matching Budget/Spending.
+- Hit one new TS/Recharts typing wrinkle beyond the `Tooltip` `formatter`
+  issue already documented in the Spending session above: annotating the
+  formatter's `value` param as `number` (as `SpendingPieChart` appears to do
+  literally in source) type-checked fine in isolation but failed once a
+  *second* Recharts `Tooltip` with a differently-shaped payload existed in
+  the same `tsc` project (generic inference from the first usage leaked into
+  the second). Fixed the same way the existing note prescribes — left
+  `value` untyped and called `Number(value)` in the body — but worth
+  flagging that the failure can appear only when multiple chart components
+  coexist, not when checking a single file alone; don't assume a Recharts
+  formatter pattern that compiles for one chart will compile for the next
+  without re-checking the whole project.
+- Verified end-to-end (see `clearbooks-verify` skill): dashboard's Income
+  panel shows real `$6,980.00 / $83,760/yr` and correctly picks the top
+  source; `/income` renders all 5 sources with correct per-source $/%
+  figures summing to the monthly total, pie chart matches (DoorDash
+  correctly omitted from the legend at $0); expanded DoorDash's row, added a
+  $95 paycheck, and confirmed the total, row, and pie chart all updated live
+  to include it (then removed it again, confirming the total reverted);
+  toggled the Yearly card and confirmed every source's yearly figure is
+  exactly 12× its monthly one; navigated to June 2026 and confirmed the
+  "No income logged for this period yet" empty state plus the still-expanded
+  DoorDash row's add-paycheck date field correctly re-defaulted to
+  `2026-06-15` (confirming the reused mount-persists-across-navigation fix
+  works here too), then "Back to current" restored July correctly; on the
+  Budget page, confirmed `AddPaycheckDialog`'s new required Source select
+  defaults sensibly and a submitted paycheck attributes to the chosen source
+  (added then removed a test $300 W-2 paycheck to leave seed data intact).
+  Dark mode read correctly on both the dashboard panel and the Income page.
+  `tsc -b`, `oxlint`, and `vite build` all clean.

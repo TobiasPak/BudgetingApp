@@ -9,13 +9,20 @@ import {
   PiggyBank,
   Landmark,
   Tag,
+  Briefcase,
+  FileText,
+  Car,
+  Bike,
+  Building2,
 } from 'lucide-react'
 import type { BudgetCategory, DistributiveOmit } from '@/types/budget'
 import type { Paycheck } from '@/types/paycheck'
 import type { Purchase } from '@/types/purchase'
+import type { IncomeSource } from '@/types/incomeSource'
 
 interface BudgetState {
   categories: BudgetCategory[]
+  incomeSources: IncomeSource[]
   paychecks: Paycheck[]
   purchases: Purchase[]
   bankBalance: number
@@ -24,6 +31,7 @@ interface BudgetState {
   // this month's paychecks have actually been logged.
   paychecksPerMonth: number
   addCategory: (category: DistributiveOmit<BudgetCategory, 'id'>) => void
+  addIncomeSource: (source: Omit<IncomeSource, 'id'>) => void
   addPaycheck: (paycheck: Omit<Paycheck, 'id'>) => void
   removePaycheck: (id: string) => void
   addPurchase: (purchase: Omit<Purchase, 'id'>) => void
@@ -52,9 +60,25 @@ export const useBudgetStore = create<BudgetState>((set) => ({
     { id: 'tax-savings', name: 'Tax Savings', icon: Landmark, color: 'chart-4', type: 'percentage', percent: 12, basis: 'paycheck', resetDay: 1 },
     { id: 'custom-hobby', name: 'Hobbies', icon: Tag, color: 'chart-3', type: 'fixed', monthlyAmount: 100, isCustom: true, resetDay: 1 },
   ],
+  // Categorizes each Paycheck by which income stream it came from — mirrors
+  // BudgetCategory's icon/color shape, matching the app's stated hybrid-
+  // worker scope (W-2 + 1099 + gig platforms). DoorDash is seeded with no
+  // paychecks yet this month, exercising the same "$0 sources are filtered
+  // out of the breakdown" path spending/budget breakdowns already handle.
+  incomeSources: [
+    { id: 'w2-job', name: 'W-2 Job', icon: Briefcase, color: 'chart-1' },
+    { id: 'freelance', name: 'Freelance', icon: FileText, color: 'chart-2' },
+    { id: 'uber', name: 'Uber', icon: Car, color: 'chart-3' },
+    { id: 'doordash', name: 'DoorDash', icon: Bike, color: 'chart-4' },
+    { id: 'airbnb', name: 'Airbnb', icon: Building2, color: 'chart-5' },
+  ],
   paychecks: [
-    { id: 'paycheck-1', amount: 2600, date: day(1) },
-    { id: 'paycheck-2', amount: 2600, date: day(15) },
+    { id: 'paycheck-1', amount: 2600, date: day(1), sourceId: 'w2-job' },
+    { id: 'paycheck-2', amount: 2600, date: day(15), sourceId: 'w2-job' },
+    { id: 'paycheck-3', amount: 800, date: day(10), sourceId: 'freelance' },
+    { id: 'paycheck-4', amount: 150, date: day(6), sourceId: 'uber' },
+    { id: 'paycheck-5', amount: 180, date: day(20), sourceId: 'uber' },
+    { id: 'paycheck-6', amount: 650, date: day(12), sourceId: 'airbnb' },
   ],
   // Itemized so each category's spend is a real sum, not a hardcoded total —
   // dining and subscriptions are deliberately over their targets (312 > 250,
@@ -88,6 +112,10 @@ export const useBudgetStore = create<BudgetState>((set) => ({
         ...state.categories,
         { ...category, id: crypto.randomUUID() } as BudgetCategory,
       ],
+    })),
+  addIncomeSource: (source) =>
+    set((state) => ({
+      incomeSources: [...state.incomeSources, { ...source, id: crypto.randomUUID() }],
     })),
   addPaycheck: (paycheck) =>
     set((state) => ({

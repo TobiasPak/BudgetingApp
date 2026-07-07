@@ -7,8 +7,11 @@ import {
   getAveragePaycheckAmount,
   getMonthlyIncome,
   getMonthlyTarget,
+  getSourceMonthlyIncome,
+  getYearlyProjectedIncome,
 } from '@/lib/income'
 import { getCategorySpent } from '@/lib/purchases'
+import { getTotalSpent } from '@/lib/spending'
 import { formatCurrency } from '@/lib/utils'
 
 const overBudgetListFormatter = new Intl.ListFormat('en', {
@@ -18,6 +21,7 @@ const overBudgetListFormatter = new Intl.ListFormat('en', {
 
 export default function HomePage() {
   const categories = useBudgetStore((state) => state.categories)
+  const incomeSources = useBudgetStore((state) => state.incomeSources)
   const paychecks = useBudgetStore((state) => state.paychecks)
   const purchases = useBudgetStore((state) => state.purchases)
   const paychecksPerMonth = useBudgetStore((state) => state.paychecksPerMonth)
@@ -46,22 +50,62 @@ export default function HomePage() {
           overCategories.length > 1 ? 'are' : 'is'
         } over budget.`
 
+  const totalSpentThisMonth = getTotalSpent(categories, purchases)
+  const spentPercentOfIncome =
+    monthlyIncome > 0 ? (totalSpentThisMonth / monthlyIncome) * 100 : 0
+  const topSpendingCategory = categories
+    .map((c) => ({ category: c, spent: getCategorySpent(purchases, c) }))
+    .filter((c) => c.spent > 0)
+    .sort((a, b) => b.spent - a.spent)[0]?.category
+
+  const spendingInsight = topSpendingCategory
+    ? `${topSpendingCategory.name} is your top spending category this month.`
+    : 'No spending logged yet this month.'
+
+  const yearlyProjectedIncome = getYearlyProjectedIncome(monthlyIncome)
+  const sourceBreakdown = incomeSources
+    .map((source) => ({
+      source,
+      amount: getSourceMonthlyIncome(paychecks, source.id),
+    }))
+    .filter((s) => s.amount > 0)
+    .sort((a, b) => b.amount - a.amount)
+  const topIncomeSource = sourceBreakdown[0]
+  const topSourcePercent =
+    topIncomeSource && monthlyIncome > 0
+      ? (topIncomeSource.amount / monthlyIncome) * 100
+      : 0
+
+  const incomeInsight = topIncomeSource
+    ? `${topIncomeSource.source.name} makes up ${topSourcePercent.toFixed(0)}% of income this month.`
+    : 'No income logged yet this month.'
+
   return (
     <main className="flex flex-col gap-4 px-6 py-6 md:h-screen">
       <h1 className="text-2xl font-semibold tracking-tight">ClearBooks</h1>
 
       <div className="grid grid-cols-1 gap-3 md:min-h-0 md:flex-1 md:grid-cols-[minmax(160px,1fr)_minmax(260px,1.3fr)_minmax(160px,1fr)] md:grid-rows-1">
         <div className="flex flex-col gap-3 md:h-full">
-          {/* Mock content — no Spending feature/store built yet. */}
           <DashboardPanel
             icon={Receipt}
             tone="info"
             label="Spending"
-            value="$2,847"
-            sub="This month · 71% of budget"
-            trend={{ percent: 12, direction: 'up', tone: 'destructive' }}
-            progressValue={71}
-            insight="Dining out is your fastest-growing category."
+            value={
+              <>
+                ${formatCurrency(totalSpentThisMonth)}{' '}
+                <span className="text-sm font-normal text-muted-foreground">
+                  / ${monthlyIncome.toLocaleString()}
+                </span>
+              </>
+            }
+            sub={
+              monthlyIncome > 0
+                ? `${spentPercentOfIncome.toFixed(0)}% of income this month`
+                : 'This month'
+            }
+            progressValue={Math.min(spentPercentOfIncome, 100)}
+            insight={spendingInsight}
+            href="/spending"
           />
 
           <DashboardPanel
@@ -91,16 +135,26 @@ export default function HomePage() {
         <MoneyOverviewCard />
 
         <div className="flex flex-col gap-3 md:h-full">
-          {/* Mock content — no Income feature/store built yet. */}
           <DashboardPanel
             icon={Banknote}
             tone="success"
             label="Income"
-            value="$6,200"
-            sub="Year to date · 3 sources"
-            trend={{ percent: 8, direction: 'up', tone: 'success' }}
-            progressValue={68}
-            insight="Gig income (1099-K) is up 40% this quarter."
+            value={
+              <>
+                ${formatCurrency(monthlyIncome)}{' '}
+                <span className="text-sm font-normal text-muted-foreground">
+                  / $
+                  {yearlyProjectedIncome.toLocaleString(undefined, {
+                    maximumFractionDigits: 0,
+                  })}
+                  /yr
+                </span>
+              </>
+            }
+            sub={`This month · ${sourceBreakdown.length} of ${incomeSources.length} sources`}
+            progressValue={Math.min(topSourcePercent, 100)}
+            insight={incomeInsight}
+            href="/income"
           />
 
           {/* Mock content — no Tax feature/store built yet. */}
