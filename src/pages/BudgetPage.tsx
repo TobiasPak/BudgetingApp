@@ -1,9 +1,11 @@
+import { useState } from 'react'
 import { Link } from 'react-router-dom'
 import { Button } from '@/components/ui/button'
 import { BudgetEnvelopeRow } from '@/components/budget/BudgetEnvelopeRow'
 import { BudgetSummary } from '@/components/budget/BudgetSummary'
 import { IncomeOverview } from '@/components/budget/IncomeOverview'
 import { AddBudgetDialog } from '@/components/budget/AddBudgetDialog'
+import { MonthYearPicker } from '@/components/budget/MonthYearPicker'
 import { useBudgetStore } from '@/stores/useBudgetStore'
 import {
   getAveragePaycheckAmount,
@@ -16,7 +18,9 @@ export default function BudgetPage() {
   const paychecks = useBudgetStore((state) => state.paychecks)
   const paychecksPerMonth = useBudgetStore((state) => state.paychecksPerMonth)
 
-  const monthlyIncome = getMonthlyIncome(paychecks)
+  const [referenceDate, setReferenceDate] = useState<Date>(() => new Date())
+
+  const monthlyIncome = getMonthlyIncome(paychecks, referenceDate)
   const averagePaycheckAmount = getAveragePaycheckAmount(paychecks)
   const targetContext = { monthlyIncome, averagePaycheckAmount, paychecksPerMonth }
 
@@ -29,9 +33,11 @@ export default function BudgetPage() {
         </Button>
       </div>
 
-      <IncomeOverview />
+      <MonthYearPicker value={referenceDate} onChange={setReferenceDate} />
 
-      <BudgetSummary />
+      <IncomeOverview referenceDate={referenceDate} />
+
+      <BudgetSummary referenceDate={referenceDate} />
 
       <div className="flex items-center justify-between">
         <h2 className="text-lg font-medium">Categories</h2>
@@ -44,6 +50,7 @@ export default function BudgetPage() {
             key={category.id}
             category={category}
             monthlyTarget={getMonthlyTarget(category, targetContext)}
+            referenceDate={referenceDate}
           />
         ))}
       </div>

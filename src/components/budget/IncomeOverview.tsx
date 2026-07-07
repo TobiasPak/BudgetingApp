@@ -22,15 +22,29 @@ function formatPaycheckDate(dateStr: string) {
   })
 }
 
-export function IncomeOverview() {
+const monthLabelFormatter = new Intl.DateTimeFormat(undefined, {
+  month: 'long',
+  year: 'numeric',
+})
+
+interface IncomeOverviewProps {
+  referenceDate: Date
+}
+
+export function IncomeOverview({ referenceDate }: IncomeOverviewProps) {
   const paychecks = useBudgetStore((state) => state.paychecks)
   const bankBalance = useBudgetStore((state) => state.bankBalance)
   const setBankBalance = useBudgetStore((state) => state.setBankBalance)
   const removePaycheck = useBudgetStore((state) => state.removePaycheck)
 
-  const monthlyIncome = getMonthlyIncome(paychecks)
+  const today = new Date()
+  const isCurrentMonth =
+    referenceDate.getFullYear() === today.getFullYear() &&
+    referenceDate.getMonth() === today.getMonth()
+
+  const monthlyIncome = getMonthlyIncome(paychecks, referenceDate)
   const yearlyProjected = getYearlyProjectedIncome(monthlyIncome)
-  const thisMonthPaychecks = getCurrentMonthPaychecks(paychecks)
+  const thisMonthPaychecks = getCurrentMonthPaychecks(paychecks, referenceDate)
 
   return (
     <Card>
@@ -38,13 +52,17 @@ export function IncomeOverview() {
         <CardTitle className="text-sm font-medium text-muted-foreground">
           Income
         </CardTitle>
-        <AddPaycheckDialog />
+        <AddPaycheckDialog referenceDate={referenceDate} />
       </CardHeader>
       <CardContent className="space-y-4">
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
           <div>
-            <p className="text-xs text-muted-foreground">Earned this month</p>
-            <p className="text-xl font-semibold">
+            <p className="text-xs text-muted-foreground">
+              {isCurrentMonth
+                ? 'Earned this month'
+                : `Earned in ${monthLabelFormatter.format(referenceDate)}`}
+            </p>
+            <p className="text-3xl font-bold">
               ${monthlyIncome.toLocaleString()}
             </p>
           </div>

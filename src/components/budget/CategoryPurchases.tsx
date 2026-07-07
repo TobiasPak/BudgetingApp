@@ -1,3 +1,4 @@
+import { useEffect } from 'react'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { Trash2 } from 'lucide-react'
@@ -6,13 +7,10 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { useBudgetStore } from '@/stores/useBudgetStore'
 import { getCategoryPurchases } from '@/lib/purchases'
+import { defaultDateForReference } from '@/lib/period'
 import { addPurchaseSchema, type AddPurchaseInput } from '@/lib/schemas/budget'
 import { formatCurrency } from '@/lib/utils'
 import type { BudgetCategory } from '@/types/budget'
-
-function todayIsoDate() {
-  return new Date().toISOString().slice(0, 10)
-}
 
 // Same reasoning as elsewhere in this file's siblings: build the display
 // date from the string's own year/month/day rather than `new Date(dateStr)`
@@ -27,14 +25,19 @@ function formatPurchaseDate(dateStr: string) {
 
 interface CategoryPurchasesProps {
   category: BudgetCategory
+  referenceDate: Date
 }
 
-export function CategoryPurchases({ category }: CategoryPurchasesProps) {
+export function CategoryPurchases({
+  category,
+  referenceDate,
+}: CategoryPurchasesProps) {
   const purchases = useBudgetStore((state) => state.purchases)
   const addPurchase = useBudgetStore((state) => state.addPurchase)
   const removePurchase = useBudgetStore((state) => state.removePurchase)
 
-  const categoryPurchases = getCategoryPurchases(purchases, category)
+  const categoryPurchases = getCategoryPurchases(purchases, category, referenceDate)
+  const defaultDate = defaultDateForReference(referenceDate)
 
   const {
     register,
@@ -43,13 +46,21 @@ export function CategoryPurchases({ category }: CategoryPurchasesProps) {
     formState: { errors },
   } = useForm<AddPurchaseInput>({
     resolver: zodResolver(addPurchaseSchema),
-    defaultValues: { date: todayIsoDate(), description: '' },
+    defaultValues: { date: defaultDate, description: '' },
   })
 
   function onSubmit(data: AddPurchaseInput) {
     addPurchase({ categoryId: category.id, ...data })
-    reset({ date: todayIsoDate(), description: '' })
+    reset({ date: defaultDateForReference(referenceDate), description: '' })
   }
+
+  // useForm's defaultValues only apply at mount — this component stays
+  // mounted while the user navigates months via MonthYearPicker (it doesn't
+  // collapse/re-expand), so without this the date field would keep
+  // defaulting to whatever month was active when the row was first expanded.
+  useEffect(() => {
+    reset({ date: defaultDateForReference(referenceDate), description: '' })
+  }, [referenceDate, reset])
 
   return (
     <div
@@ -97,7 +108,7 @@ export function CategoryPurchases({ category }: CategoryPurchasesProps) {
             id={`date-${category.id}`}
             type="date"
             className="h-8 w-36"
-            defaultValue={todayIsoDate()}
+            defaultValue={defaultDate}
             {...register('date')}
           />
         </div>

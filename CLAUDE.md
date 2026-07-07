@@ -47,7 +47,7 @@ what the installed create-vite version ships.
 
 ## Current Status
 
-**Budget envelopes + dashboard home + income tracking. Foundation otherwise unchanged.**
+**Budget envelopes + dashboard home + income tracking + month/year ledger navigation. Foundation otherwise unchanged.**
 
 Implemented:
 - Project scaffold (Vite + React 18 + TypeScript), clean `npm install`
@@ -91,6 +91,40 @@ Implemented:
   it (`CategoryPurchases`) showing that category's purchase list (with
   remove buttons) plus a small React Hook Form + Zod "add purchase" form
   (date, description, amount)
+- **Month/year ledger navigation** (`/budget`): a `MonthYearPicker`
+  (prev/next arrow buttons + a clickable month/year label opening a
+  popover with month/year `Select` dropdowns, plus a "Back to current"
+  link when viewing a past month) lets the whole Budget page "time
+  travel" to a past month and see that month's ledger — paychecks,
+  category spend, and reset-cycle date ranges all recompute for the
+  viewed month instead of always showing the current one. Implemented by
+  threading an optional `reference: Date = new Date()` parameter through
+  every derived-value helper (`getCategoryPurchases`/`getCategorySpent`
+  in `src/lib/purchases.ts`, `getCurrentPeriod` in `src/lib/period.ts`,
+  `getMonthlyIncome`/`getCurrentMonthPaychecks` in `src/lib/income.ts`),
+  defaulting to "now" so every pre-existing call site keeps working
+  unchanged. `BudgetPage` holds the selected `referenceDate` as state and
+  passes it down to `IncomeOverview`, `BudgetSummary`, `BudgetEnvelopeRow`,
+  `AddPaycheckDialog`, and `CategoryPurchases`. Scoped to the Budget page
+  only — the dashboard's live panels keep always showing the current
+  month. Categories themselves and `bankBalance` are **not** versioned —
+  they're "current state," not part of the historical ledger; only
+  paychecks/purchases (both already timestamped) are filtered by the
+  viewed month
+- **Budget summary panels + category breakdown bar** (`/budget`):
+  `BudgetSummary` renders 3 clickable stat cards ("Monthly Spent /
+  Income", "Monthly Spent / Total Budgeted", "Yearly Spent / Total
+  Budgeted" — big dollar figure matching each metric's own denominator,
+  plus the income card's percentage shown as a smaller secondary number).
+  Clicking a card selects it as the active metric (ring-highlighted) and
+  drives `CategoryBreakdownBar` below — a full-width horizontal stacked
+  bar + icon/name/percent/$-amount legend showing what fraction of the
+  selected total (income, monthly budget, or yearly budget) each category
+  accounts for, sorted largest-first, zero-spend categories omitted, with
+  an empty-state message when nothing's been logged for the viewed
+  period. Segment/legend colors use new dedicated `--category-1..5`
+  tokens (see Architecture) rather than the grayscale `--chart-1..5`
+  tokens used for category icons elsewhere
 - **Recurring reset cycles**: every category has a `resetDay` (1–31) and
   recurs monthly on that day rather than always the calendar month — e.g.
   resetDay 15 means the category's current cycle is "the 15th of last
@@ -142,10 +176,13 @@ src/
   assets/          # static images/icons (currently empty — template assets removed)
   components/
     ui/            # shadcn-generated primitives (button, card, progress,
-                    # dialog, input, label, select)
+                    # dialog, input, label, select, popover)
     budget/        # Budget feature components (BudgetEnvelopeRow, BudgetSummary,
                     # IncomeOverview, AddBudgetDialog, AddPaycheckDialog,
-                    # CategoryPurchases — the expand-on-click purchase log/add form)
+                    # CategoryPurchases — the expand-on-click purchase log/add form,
+                    # MonthYearPicker — prev/next + popover month/year selector,
+                    # CategoryBreakdownBar — stacked bar + legend driven by
+                    # BudgetSummary's 3 clickable metric cards)
     dashboard/     # Dashboard home components (DashboardPanel, MoneyOverviewCard)
     charts/        # Recharts wrapper components (future — not the same as
                     # MoneyOverviewCard's donut, which is a hand-rolled CSS
@@ -170,7 +207,10 @@ src/
                     # its current period, never stored directly
     period.ts      # recurring reset-cycle date math (getCurrentPeriod,
                     # formatPeriodRange) — a category's resetDay (1-31) maps to
-                    # a current start/end date range; day-clamped for short months
+                    # a current start/end date range; day-clamped for short months.
+                    # Also defaultDateForReference — the shared "default form date
+                    # for whichever month is currently being viewed" helper used by
+                    # both AddPaycheckDialog and CategoryPurchases
     schemas/
       budget.ts    # Zod schemas: addBudgetSchema, addPaycheckSchema, addPurchaseSchema
   hooks/           # custom hooks incl. TanStack Query hooks (created on first use)
@@ -214,11 +254,15 @@ Conventions:
   target it via `[&_[data-slot=progress-indicator]]:bg-*` for color
   overrides, not a positional selector like `[&>div]`.
 - Semantic color tokens: `--destructive` (pre-existing) plus `--success`/
-  `--info`/`--warning` (added this session) in `src/index.css`, each with
+  `--info`/`--warning` and `--category-1..5` in `src/index.css`, each with
   light + dark values, registered in the `@theme inline` block so Tailwind
   generates `text-*`/`bg-*`/`border-*` utilities. Use these for meaning
   (status, category identity) rather than `--chart-1..5`, which are
-  grayscale in the installed Nova preset.
+  grayscale in the installed Nova preset. `--category-1..5` specifically
+  back `CategoryBreakdownBar`'s bar segments/legend dots — a real colorful
+  qualitative palette, kept separate from `--chart-1..5` (which categories'
+  own icons still use elsewhere, e.g. `BudgetEnvelopeRow`) rather than
+  reusing/recoloring that existing grayscale token set.
 - **shadcn primitives generated by this project's CLI/registry version are
   NOT wrapped in `React.forwardRef` by default** — `Button`, `Input`,
   `DialogOverlay`, and `DialogContent` all needed a manual `forwardRef` fix
@@ -235,6 +279,21 @@ Conventions:
   to `useForm()` — otherwise a field's stale value survives after its input
   unmounts and can fail Zod validation for a branch that's no longer active
   (see `AddBudgetDialog.tsx`)
+- **"View as of a past date" pattern**: functions that compute a derived
+  value for "the current period" (`getCategoryPurchases`/`getCategorySpent`,
+  `getCurrentPeriod`, `getMonthlyIncome`/`getCurrentMonthPaychecks`) take an
+  optional trailing `reference: Date = new Date()` parameter instead of a
+  separate "historical" variant — keeps one code path for both live and
+  time-traveled views, and every pre-existing call site keeps working
+  unchanged since the parameter defaults to now
+- **`useForm`'s `defaultValues` only apply at mount** — if a form component
+  stays mounted while the value it should default to changes (e.g.
+  `CategoryPurchases`'s date field should re-default when the user
+  navigates `MonthYearPicker` to a different month without collapsing the
+  row), `defaultValues` alone won't pick up the change. Needs an explicit
+  `useEffect(() => reset({...}), [theChangedProp, reset])` — found as a
+  real bug this session (the add-purchase date field kept showing the
+  previously-viewed month after navigating back), see Session Log
 - Cloud Functions live in `functions/` — separate `package.json`/`tsconfig.json`,
   own dependency tree (`firebase-admin`, `firebase-functions`)
 - Client env vars: only `VITE_FIREBASE_*` (see `.env.example`). Plaid/Veryfi/Resend
@@ -553,3 +612,136 @@ above so it always reflects the real state of the repo.
   again and confirmed the total reverted to $468.00; confirmed the
   expand/collapse toggle works in both directions. `tsc -b`,
   `npm run lint`, `npm run build` all clean.
+
+### 2026-07-04 — Month/year ledger navigation
+- User asked to be able to view previous months'/years' budget plans on
+  the Budget screen via a control to select the month and year. Rather
+  than asking which UI shape they meant, designed a combined navigator —
+  prev/next arrow buttons plus a clickable month/year label that opens a
+  popover with `Select` dropdowns — reasoning that it satisfies both
+  plausible readings of "buttons which I can select the month and year"
+  without needing to interrupt the user for it.
+- Threaded an optional `reference: Date = new Date()` parameter through
+  every function that computes "the current period" so each one can
+  instead compute "the period as of some other date," while every
+  pre-existing call site keeps working unchanged (documented as the
+  general "view as of a past date" pattern in Architecture above):
+  `getCategoryPurchases`/`getCategorySpent` (`src/lib/purchases.ts`),
+  `getCurrentPeriod` (`src/lib/period.ts`), `getMonthlyIncome`/
+  `getCurrentMonthPaychecks` (`src/lib/income.ts`). Left
+  `getAveragePaycheckAmount` alone (no reference param) — it's
+  deliberately averaged over *all* paychecks ever, not scoped to any
+  particular month, so there was nothing to thread through.
+- Added shadcn `popover` (`npx shadcn@latest add popover -y`) and
+  proactively fixed its generated `PopoverContent`'s missing
+  `React.forwardRef` before it could cause the same
+  `DialogTrigger`-asChild-ref bug documented earlier in this file —
+  checked-and-fixed-on-add, not reactive this time.
+- Built `MonthYearPicker.tsx`: prev/next `ChevronLeft`/`ChevronRight`
+  buttons, a `Popover`-triggered month/year `Select` pair, and a "Back to
+  current" link shown only while viewing a past month. Selections anchor
+  the resulting reference date to the **15th** of the chosen month
+  (`makeReferenceDate`) — a stable, resetDay-agnostic middle-of-the-month
+  point so `getCurrentPeriod` resolves "which cycle was active during
+  this month" consistently no matter what `resetDay` a given category
+  uses. Clamped so you can never navigate into a future month (there's no
+  future ledger to show).
+- `BudgetPage` now owns `referenceDate` as `useState<Date>`, renders
+  `MonthYearPicker`, and passes `referenceDate` down to `IncomeOverview`,
+  `BudgetSummary`, every `BudgetEnvelopeRow`, and (through those)
+  `AddPaycheckDialog`/`CategoryPurchases`. Extracted a shared
+  `defaultDateForReference(referenceDate)` helper into `src/lib/period.ts`
+  (default to today when viewing the current month, else default
+  somewhere inside the viewed month) since both `AddPaycheckDialog` and
+  `CategoryPurchases` needed the identical logic for their date fields'
+  defaults — factored out rather than duplicated.
+- Deliberately did **not** version categories or `bankBalance` — per the
+  user's request this is about viewing past *ledgers* (paychecks and
+  purchases, both already timestamped), not about reconstructing what
+  categories existed or what the bank balance was at some prior date.
+- **Found and fixed a real bug during verification**: `CategoryPurchases`
+  stays mounted (doesn't collapse/remount) while the user navigates
+  months via `MonthYearPicker`, but `useForm`'s `defaultValues` only
+  apply once at mount — so the add-purchase form's date field kept
+  showing whatever month was active when the row was first expanded,
+  even after navigating to a different month. Fixed with a
+  `useEffect(() => reset({ date: defaultDateForReference(referenceDate),
+  description: '' }), [referenceDate, reset])` that re-defaults the field
+  whenever the viewed month changes. Documented as a general gotcha in
+  Architecture above ("`useForm`'s `defaultValues` only apply at mount")
+  since it'll recur for any form that lives inside a component which
+  doesn't remount on the prop it should react to.
+- Verified end-to-end via the dev server: navigating to June 2026 (no
+  mock data exists there) correctly zeroed every category's spend and
+  income to $0, correctly updated every row's date range to "Jun 1 – Jun
+  30", and correctly kept a per-paycheck percentage category (Tax
+  Savings, $624 target) unaffected while a per-monthly-income percentage
+  category (Savings) correctly dropped to a $0 target since June's income
+  is $0; backfilled a test purchase into June, confirmed it summed
+  correctly into that category's June total, removed it, and confirmed
+  "Back to current" correctly restored July 2026's original totals with
+  no data leakage between months; confirmed the mount-only-defaultValues
+  bug above by expanding Groceries, navigating to June without
+  collapsing it, and watching the date field update live from
+  `2026-07-04` to `2026-06-15` after the fix (it did not before). Dark
+  mode sanity-checked via `preview_resize` + manually toggling the
+  `.dark` class — picker, popover, and expanded panel all read correctly.
+  `tsc -b`, `npm run lint`, `npm run build` all clean.
+
+### 2026-07-04 — Budget summary restyle + category breakdown bar
+- Iterative small requests refining `BudgetSummary`'s 2-card layout: made
+  "Earned this month" bigger/bolder in `IncomeOverview` to read as the
+  headline figure; renamed the "Monthly"/"Yearly" card titles to "Monthly
+  Spent / Total Budgeted" / "Yearly Spent / Total Budgeted" per explicit
+  user wording; added a 3rd card "Monthly Spent / Income" (spent as a %
+  of monthly income, guarding the divide-by-zero case with an em dash
+  when a viewed month has no logged paychecks) and switched the grid from
+  2 to 3 columns; reordered so Income comes first, then Total Budgeted,
+  then Yearly; then restyled the Income card specifically so the big
+  number matches the other two cards' `$spent / $total` format, with the
+  percentage demoted to a small secondary number on the right rather than
+  being the headline figure.
+- Built `CategoryBreakdownBar.tsx`: a full-width panel below the 3 summary
+  cards showing a horizontal stacked bar + icon/name/percent/$-amount
+  legend of what fraction of a selected total each budget category
+  accounts for. Made each of the 3 summary cards clickable (`role="button"`,
+  `tabIndex`, `onKeyDown` for Enter/Space, ring-highlight on the selected
+  one) to drive which total the bar measures against — `BudgetSummary`
+  holds `selectedMetric: 'income' | 'monthlyBudgeted' | 'yearlyBudgeted'`
+  as local state and passes it straight through as a prop rather than
+  lifting it further, since nothing above `BudgetSummary` needs it.
+  Per-category amounts reuse `getCategorySpent` (already reference-date
+  aware); for the yearly metric the amount is `monthlySpent * 12` to stay
+  consistent with how `yearlyBudgeted`/`yearlySpent` are already derived
+  elsewhere in this file. Categories with $0 spent in the viewed period
+  are filtered out of both the bar and legend (a 0%-width segment adds
+  nothing and just clutters the legend), and an explicit empty-state
+  message replaces the bar entirely when literally nothing has been
+  logged (e.g. navigating to a past month with no purchases).
+- Found the installed shadcn Nova theme's `--chart-1..5` tokens (already
+  documented elsewhere in this file as grayscale, used for category icon
+  tinting) would make a multi-category stacked bar monotone and defeat
+  the "make it visually appealing" ask — rather than reusing/recoloring
+  that existing token set (which categories' icons still depend on
+  elsewhere) or hardcoding hex values into the component, added a
+  separate `--category-1..5` token set to `src/index.css` (light + dark
+  oklch values, real distinct hues: blue/teal/amber/violet/rose),
+  registered in the `@theme inline` block the same way `--success`/
+  `--info`/`--warning` were previously, giving `bg-category-1..5`
+  utilities. Mapped via a `Record<ChartColorToken, string>` lookup
+  (`segmentColorClass`) rather than a template literal, per this file's
+  standing "never build Tailwind class names dynamically" rule.
+- Verified end-to-end via the dev server: bar renders with 5 distinct
+  colors across the 9 mock categories (colors cycle since there are only
+  5 tokens for 9 categories, same reuse pattern the app's icons already
+  accept); clicking each of the 3 summary cards correctly re-highlights
+  it and recalculates both the bar segment widths and every legend
+  percentage/dollar figure (confirmed Rent goes from 34.6% under Income
+  to 40.3% under Monthly Budgeted, and the Yearly view's dollar amounts
+  are exactly 12× the monthly ones while percentages match Monthly
+  Budgeted's); navigated to June 2026 (no purchases) and confirmed the
+  "No spending logged for this period yet" empty state replaces the bar
+  correctly instead of rendering a broken/zero-width bar; dark mode
+  sanity-checked via manually toggling the `.dark` class — all 5 category
+  colors and the card ring-highlight remain legible against the dark
+  background. `tsc -b`, `npm run lint`, `npm run build` all clean.

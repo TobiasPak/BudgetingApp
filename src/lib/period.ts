@@ -62,6 +62,21 @@ export function getCurrentPeriod(
   return { start, end }
 }
 
+// Default date (ISO "YYYY-MM-DD") for a new record when the user is
+// looking at `referenceDate`'s month. Viewing the current month defaults
+// to today (unchanged prior behavior); viewing a past month defaults to
+// somewhere inside that month instead of always landing on today's date —
+// makes it quick to backfill a paycheck/purchase you forgot to log while
+// you're already looking at that period.
+export function defaultDateForReference(referenceDate: Date): string {
+  const today = new Date()
+  const isCurrentMonth =
+    referenceDate.getFullYear() === today.getFullYear() &&
+    referenceDate.getMonth() === today.getMonth()
+  const base = isCurrentMonth ? today : referenceDate
+  return formatIsoDate(base.getFullYear(), base.getMonth() + 1, base.getDate())
+}
+
 // "Jul 5 – Aug 4" — parses the ISO string's own components rather than
 // `new Date(isoString)`, which parses as UTC midnight and can display as
 // the previous day in negative UTC-offset timezones.

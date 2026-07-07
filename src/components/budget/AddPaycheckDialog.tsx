@@ -16,13 +16,13 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { useBudgetStore } from '@/stores/useBudgetStore'
 import { addPaycheckSchema, type AddPaycheckInput } from '@/lib/schemas/budget'
+import { defaultDateForReference } from '@/lib/period'
 
-// yyyy-mm-dd, the exact format <input type="date"> expects/returns.
-function todayIsoDate() {
-  return new Date().toISOString().slice(0, 10)
+interface AddPaycheckDialogProps {
+  referenceDate: Date
 }
 
-export function AddPaycheckDialog() {
+export function AddPaycheckDialog({ referenceDate }: AddPaycheckDialogProps) {
   const [open, setOpen] = useState(false)
   const addPaycheck = useBudgetStore((state) => state.addPaycheck)
 
@@ -33,12 +33,12 @@ export function AddPaycheckDialog() {
     formState: { errors },
   } = useForm<AddPaycheckInput>({
     resolver: zodResolver(addPaycheckSchema),
-    defaultValues: { date: todayIsoDate() },
+    defaultValues: { date: defaultDateForReference(referenceDate) },
   })
 
   function onSubmit(data: AddPaycheckInput) {
     addPaycheck(data)
-    reset({ date: todayIsoDate() })
+    reset({ date: defaultDateForReference(referenceDate) })
     setOpen(false)
   }
 
@@ -77,7 +77,7 @@ export function AddPaycheckDialog() {
             <Input
               id="date"
               type="date"
-              defaultValue={todayIsoDate()}
+              defaultValue={defaultDateForReference(referenceDate)}
               {...register('date')}
             />
             {errors.date && (

@@ -25,19 +25,21 @@ const basisLabel: Record<'paycheck' | 'monthlyIncome', string> = {
 interface BudgetEnvelopeRowProps {
   category: BudgetCategory
   monthlyTarget: number
+  referenceDate: Date
 }
 
 export function BudgetEnvelopeRow({
   category,
   monthlyTarget,
+  referenceDate,
 }: BudgetEnvelopeRowProps) {
   const [isExpanded, setIsExpanded] = useState(false)
   const purchases = useBudgetStore((state) => state.purchases)
 
-  const spent = getCategorySpent(purchases, category)
+  const spent = getCategorySpent(purchases, category, referenceDate)
   const overBudget = isOverBudget(spent, monthlyTarget)
   const Icon = category.icon
-  const period = getCurrentPeriod(category.resetDay)
+  const period = getCurrentPeriod(category.resetDay, referenceDate)
 
   return (
     <div data-slot="budget-envelope-row">
@@ -98,7 +100,9 @@ export function BudgetEnvelopeRow({
         />
       </button>
 
-      {isExpanded && <CategoryPurchases category={category} />}
+      {isExpanded && (
+        <CategoryPurchases category={category} referenceDate={referenceDate} />
+      )}
     </div>
   )
 }
