@@ -305,7 +305,11 @@ Conventions:
 
 **Process note: update this section at the end of every work session** —
 append a dated entry summarizing what was built, and refresh "Current Status"
-above so it always reflects the real state of the repo.
+above so it always reflects the real state of the repo. For *how* to verify a
+change (dev server, routes, `tsc`/lint/build, dark mode, preview-tool
+gotchas), use the `clearbooks-verify` skill (`.claude/skills/clearbooks-verify/`) instead of
+re-describing the procedure here — new entries should record each session's
+unique findings, not the standard checklist.
 
 ### 2026-07-01 — Foundation scaffolding
 - Found repo was not actually scaffolded despite 2 prior commits: no
@@ -376,16 +380,13 @@ above so it always reflects the real state of the repo.
   `style` (not a Tailwind class) since the percentages are dynamic —
   documented this pattern, plus the general "don't build Tailwind class
   names via template literals" rule, in Architecture above.
-- Verified end-to-end via the dev server: dashboard renders correctly at
+- Verified end-to-end (see `clearbooks-verify` skill): dashboard renders correctly at
   desktop width (single-column below the `md` breakpoint, 3-column above),
   only the Budget panel is a real `<a>`/link element per the accessibility
   tree, Budget page shows correct per-category over/under styling (exactly
   matching mock data), monthly/yearly totals arithmetically correct, donut
-  slice values match the store's real totals, `tsc -b`/`npm run lint`/
-  `npm run build` all clean, dark-mode CSS variables verified correct via
-  manually toggling the `.dark` class (no toggle UI exists yet, so
-  `prefers-color-scheme` emulation alone doesn't activate it — that's
-  expected given no dark-mode toggle has been built).
+  slice values match the store's real totals; dark mode reads correctly.
+  All clean.
 - Noted but not investigated further: the `preview_click` tool didn't
   trigger React Router navigation on the dashboard's `Link` elements
   (dispatching `.click()` via `preview_eval` worked immediately) — likely
@@ -450,31 +451,20 @@ above so it always reflects the real state of the repo.
      percentage budget failed base-schema validation on a field that
      wasn't even visible, independent of the category's actual `type`.
      Fixed with `shouldUnregister: true` on `useForm()`.
-  - Diagnosing bug #2 required bypassing `console.log`/`preview_console_logs`
-    entirely partway through — that tool's log buffer accumulates for the
-    whole session and never clears/ages out, so "is this error from my
-    latest change or five reloads ago" was impossible to answer from logs
-    alone. Switched to writing state directly onto `window.__debugX` and
-    reading it back synchronously in the same `preview_eval` call, which
-    gave a reliable answer. Worth remembering for future browser-based
-    debugging in this environment: prefer `window`-variable handoff over
-    console-log inspection when call-to-call ordering matters.
-  - Also noticed: separate `preview_eval` calls in a row against an
-    open Radix `Dialog` sometimes caused it to close between calls
-    (plausibly a focus-change side effect of how the tool executes JS
-    being interpreted as an "outside click" by Radix's dismissable layer).
-    Doing an entire multi-step interaction (open → fill → select → submit)
-    inside one `async` `preview_eval` call with small `setTimeout` waits
-    between steps was reliable; splitting the same steps across multiple
-    tool calls was not.
-- Verified end-to-end via the dev server: added both a percentage category
+  - Diagnosing bug #2 surfaced two debugging techniques worth keeping —
+    preferring `window`-variable handoff over `preview_console_logs` when
+    call-ordering matters, and doing multi-step Radix Dialog interactions
+    inside a single `preview_eval` call rather than splitting across calls
+    (splitting caused the dialog to close prematurely). Both are now
+    folded into the `clearbooks-verify` skill rather than documented here.
+- Verified end-to-end (see `clearbooks-verify` skill): added both a percentage category
   (Vacation Fund, 5% of monthly income → correctly computed $260 target
   off $5,200 income) and a fixed category (Emergency Fund, $200), each
   correctly folding into the monthly/yearly summary totals; added and
   removed a paycheck and confirmed "earned this month"/"projected this
   year"/every percentage-budget target recalculated correctly; confirmed
   the dashboard's Budget panel and money-overview donut pick up the same
-  real totals. `tsc -b`, `npm run lint`, `npm run build` all clean.
+  real totals. All clean.
 
 ### 2026-07-03 — Dashboard fills the screen
 - User asked for the dashboard panels to fill the whole screen instead of
@@ -490,9 +480,9 @@ above so it always reflects the real state of the repo.
   low-resolution preview screenshot, which made the layout look like it
   had a large empty gap at the bottom even though it didn't — confirmed
   page height was exactly the 900px viewport with zero scroll overflow
-  and panels were genuinely ~400px tall each. Worth remembering: for
-  "does this fill the available space" questions, computed layout
-  geometry is more trustworthy than eyeballing a compressed screenshot.
+  and panels were genuinely ~400px tall each. (This "trust computed
+  geometry over screenshots for fills-the-space questions" technique is
+  now folded into the `clearbooks-verify` skill.)
 
 ### 2026-07-03 — Budget log view + recurring reset cycles
 - User asked for the Budget screen's category list to become a log/row
@@ -532,14 +522,13 @@ above so it always reflects the real state of the repo.
   `BudgetEnvelopeRow.tsx` (a horizontal log row: date range → name/icon →
   progress bar → spent/target, stacking vertically below `sm:`) and swapped
   `BudgetPage`'s card grid for a single bordered `divide-y` list.
-- Verified end-to-end: all 9 seeded categories render correctly as rows
-  with their calendar-month range ("Jul 1 – Jul 31"); added a category
-  with `resetDay: 10` and confirmed it correctly showed "Jun 10 – Jul 9"
-  (today, Jul 3, is before the 10th, so the active cycle started last
-  month); directly exercised `checkPeriodResets` by writing a stale
-  `periodStart` onto a category via the store and confirming
-  `monthlySpent` zeroed out and `periodStart` advanced. `tsc -b`,
-  `npm run lint`, `npm run build` all clean.
+- Verified end-to-end (see `clearbooks-verify` skill): all 9 seeded categories render
+  correctly as rows with their calendar-month range ("Jul 1 – Jul 31");
+  added a category with `resetDay: 10` and confirmed it correctly showed
+  "Jun 10 – Jul 9" (today, Jul 3, is before the 10th, so the active cycle
+  started last month); directly exercised `checkPeriodResets` by writing
+  a stale `periodStart` onto a category via the store and confirming
+  `monthlySpent` zeroed out and `periodStart` advanced. All clean.
 
 ### 2026-07-03 — Itemized purchases per category
 - User asked for each category row to be clickable, expanding an inline
@@ -604,14 +593,13 @@ above so it always reflects the real state of the repo.
   chosen to sum to the exact totals the old flat `monthlySpent` mock
   values used, so the app's existing demo scenarios (Dining Out and
   Subscriptions over budget) still hold.
-- Verified end-to-end via the dev server: every row's derived spent total
-  matched the old hardcoded totals exactly; expanding Groceries showed
-  its 3 purchases correctly sorted most-recent-first; added a "Whole
-  Foods run" $32.50 purchase and confirmed the row total updated to
-  $500.50 live (crossing into overspend territory correctly); removed it
-  again and confirmed the total reverted to $468.00; confirmed the
-  expand/collapse toggle works in both directions. `tsc -b`,
-  `npm run lint`, `npm run build` all clean.
+- Verified end-to-end (see `clearbooks-verify` skill): every row's derived spent
+  total matched the old hardcoded totals exactly; expanding Groceries
+  showed its 3 purchases correctly sorted most-recent-first; added a
+  "Whole Foods run" $32.50 purchase and confirmed the row total updated
+  to $500.50 live (crossing into overspend territory correctly); removed
+  it again and confirmed the total reverted to $468.00; confirmed the
+  expand/collapse toggle works in both directions. All clean.
 
 ### 2026-07-04 — Month/year ledger navigation
 - User asked to be able to view previous months'/years' budget plans on
@@ -671,7 +659,7 @@ above so it always reflects the real state of the repo.
   Architecture above ("`useForm`'s `defaultValues` only apply at mount")
   since it'll recur for any form that lives inside a component which
   doesn't remount on the prop it should react to.
-- Verified end-to-end via the dev server: navigating to June 2026 (no
+- Verified end-to-end (see `clearbooks-verify` skill): navigating to June 2026 (no
   mock data exists there) correctly zeroed every category's spend and
   income to $0, correctly updated every row's date range to "Jun 1 – Jun
   30", and correctly kept a per-paycheck percentage category (Tax
@@ -684,9 +672,7 @@ above so it always reflects the real state of the repo.
   bug above by expanding Groceries, navigating to June without
   collapsing it, and watching the date field update live from
   `2026-07-04` to `2026-06-15` after the fix (it did not before). Dark
-  mode sanity-checked via `preview_resize` + manually toggling the
-  `.dark` class — picker, popover, and expanded panel all read correctly.
-  `tsc -b`, `npm run lint`, `npm run build` all clean.
+  mode read correctly. All clean.
 
 ### 2026-07-04 — Budget summary restyle + category breakdown bar
 - Iterative small requests refining `BudgetSummary`'s 2-card layout: made
@@ -731,7 +717,7 @@ above so it always reflects the real state of the repo.
   utilities. Mapped via a `Record<ChartColorToken, string>` lookup
   (`segmentColorClass`) rather than a template literal, per this file's
   standing "never build Tailwind class names dynamically" rule.
-- Verified end-to-end via the dev server: bar renders with 5 distinct
+- Verified end-to-end (see `clearbooks-verify` skill): bar renders with 5 distinct
   colors across the 9 mock categories (colors cycle since there are only
   5 tokens for 9 categories, same reuse pattern the app's icons already
   accept); clicking each of the 3 summary cards correctly re-highlights
@@ -741,7 +727,52 @@ above so it always reflects the real state of the repo.
   are exactly 12× the monthly ones while percentages match Monthly
   Budgeted's); navigated to June 2026 (no purchases) and confirmed the
   "No spending logged for this period yet" empty state replaces the bar
-  correctly instead of rendering a broken/zero-width bar; dark mode
-  sanity-checked via manually toggling the `.dark` class — all 5 category
-  colors and the card ring-highlight remain legible against the dark
-  background. `tsc -b`, `npm run lint`, `npm run build` all clean.
+  correctly instead of rendering a broken/zero-width bar; dark mode read
+  correctly — all 5 category colors and the card ring-highlight remain
+  legible against the dark background. All clean.
+
+### 2026-07-06 — Extracted a `clearbooks-verify` skill from repeated Session Log boilerplate
+- User asked whether anything in this file could become a Claude Code
+  skill instead of static documentation. The recurring "Verified
+  end-to-end via the dev server: `tsc -b`/`npm run lint`/`npm run build`
+  all clean, dark mode toggled via `.dark` class" paragraph had been
+  duplicated near-verbatim across essentially every Session Log entry
+  above — a *procedure* re-described every session rather than a fact
+  that just needs to be known once. Alongside it, three one-off
+  debugging techniques (prefer `window`-variable handoff over
+  `preview_console_logs` for call-ordering; do multi-step Radix
+  Dialog/Popover interactions inside one `preview_eval` call, not split
+  across calls; verify layout-fills-the-space questions via
+  `getBoundingClientRect()` rather than a screenshot) were the same kind
+  of reusable-procedure content.
+- Created `.claude/skills/clearbooks-verify/SKILL.md` — a project-scoped
+  skill encoding the `clearbooks-dev` launch config, which routes matter
+  (`/budget` primarily), the standard `tsc -b`/`lint`/`build` sequence,
+  the no-dark-mode-toggle-UI caveat, and all three debugging techniques
+  above. Confirmed `.claude/launch.json` already had the correct
+  `clearbooks-dev` config from earlier sessions, so nothing needed
+  changing there.
+- **First name choice collided with an existing global skill**: initially
+  named it `verify`, but invoking it resolved to a *different*,
+  pre-existing bundled skill with its own runtime-observation philosophy
+  (no relation to this app). That skill's own instructions revealed the
+  actual convention this ecosystem expects: it looks for companion
+  skills named `verifier-*` under `.claude/skills/` and auto-invokes them
+  as its "handle" for a repo. Renamed to `clearbooks-verify` instead of
+  chasing the full `verifier-*` protocol (which does recording/replay —
+  more than what was asked for here); this skill remains a standalone
+  preview-tool reference, invoked directly by name.
+- Trimmed every Session Log entry above that repeated the verification
+  boilerplate or one of the three debugging techniques down to a short
+  pointer ("see `clearbooks-verify` skill") plus each entry's own unique
+  findings/results — deliberately did **not** touch or shorten the
+  unique substance of what was learned each session (specific bugs
+  found, specific numbers confirmed), only the repeated *how-we-checked*
+  procedure text. Left architecture/convention content (shadcn
+  `forwardRef` gap, `useForm` `defaultValues`-only-at-mount, Tailwind
+  dynamic-class rule, color tokens, reference-date pattern) untouched —
+  that's standing knowledge about the codebase, not a procedure, and
+  doesn't belong in a skill.
+- Added a pointer in this section's process note directing future
+  sessions to the `clearbooks-verify` skill instead of re-describing the
+  verification procedure inline going forward.
