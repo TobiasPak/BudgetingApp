@@ -1,5 +1,7 @@
 import { useState } from 'react'
 import { MoneySummaryRow } from '@/components/dashboard/MoneySummaryRow'
+import { LoadDemoDataButton } from '@/components/dashboard/LoadDemoDataButton'
+import { SignOutButton } from '@/components/auth/SignOutButton'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { SpendingContent } from '@/components/spending/SpendingContent'
 import { BudgetContent } from '@/components/budget/BudgetContent'
@@ -12,7 +14,13 @@ export default function HomePage() {
 
   return (
     <main className="mx-auto flex max-w-4xl flex-col gap-6 px-4 py-8">
-      <h1 className="text-2xl font-semibold tracking-tight">ClearBooks</h1>
+      <div className="flex items-center justify-between">
+        <h1 className="text-2xl font-semibold tracking-tight">ClearBooks</h1>
+        <div className="flex items-center gap-2">
+          <LoadDemoDataButton />
+          <SignOutButton />
+        </div>
+      </div>
 
       <Tabs
         value={activeTab}

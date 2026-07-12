@@ -1,8 +1,52 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-    match /{document=**} {
-      allow read, write: if false;
+    function isOwner(userId) {
+      return request.auth != null && request.auth.uid == userId;
+    }
+
+    match /users/{userId} {
+      allow read: if isOwner(userId);
+      allow create: if isOwner(userId);
+      allow update: if isOwner(userId)
+        && (!('bankBalance' in request.resource.data) || request.resource.data.bankBalance is number)
+        && (!('paychecksPerMonth' in request.resource.data) || request.resource.data.paychecksPerMonth is number);
+      allow delete: if false;
+
+      match /categories/{categoryId} {
+        allow read, delete: if isOwner(userId);
+        allow create, update: if isOwner(userId)
+          && request.resource.data.name is string
+          && request.resource.data.iconName is string
+          && request.resource.data.color is string
+          && request.resource.data.resetDay is number
+          && request.resource.data.type in ['fixed', 'percentage'];
+      }
+
+      match /incomeSources/{sourceId} {
+        allow read, delete: if isOwner(userId);
+        allow create, update: if isOwner(userId)
+          && request.resource.data.name is string
+          && request.resource.data.iconName is string
+          && request.resource.data.color is string;
+      }
+
+      match /paychecks/{paycheckId} {
+        allow read, delete: if isOwner(userId);
+        allow create, update: if isOwner(userId)
+          && request.resource.data.amount is number && request.resource.data.amount > 0
+          && request.resource.data.date is string
+          && request.resource.data.sourceId is string;
+      }
+
+      match /purchases/{purchaseId} {
+        allow read, delete: if isOwner(userId);
+        allow create, update: if isOwner(userId)
+          && request.resource.data.amount is number && request.resource.data.amount > 0
+          && request.resource.data.date is string
+          && request.resource.data.categoryId is string
+          && request.resource.data.description is string;
+      }
     }
   }
 }

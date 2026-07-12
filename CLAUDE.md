@@ -47,13 +47,14 @@ what the installed create-vite version ships.
 
 ## Current Status
 
-**Budget envelopes + revamped tabbed dashboard home + income tracking + month/year ledger navigation + spending screen + income screen. Foundation otherwise unchanged.**
+**Budget envelopes + revamped tabbed dashboard home + income tracking + month/year ledger navigation + spending screen + income screen + real Firebase Auth/Firestore persistence. Plaid still not started.**
 
 Implemented:
 - Project scaffold (Vite + React 18 + TypeScript), clean `npm install`
 - Routing: `/` (dashboard home), `/budget` (Budget envelopes + income), `/spending` (Spending screen), `/income` (Income screen), `/about` (placeholder)
 - Tailwind v4 + shadcn/ui wired up (`components.json`, `src/lib/utils.ts`,
-  components: `button`, `card`, `progress`, `dialog`, `input`, `label`, `select`)
+  components: `button`, `card`, `progress`, `dialog`, `input`, `label`,
+  `select`, `popover`, `tabs`, `sonner`, `alert-dialog`)
 - Semantic color tokens `--success`/`--info`/`--warning` added to
   `src/index.css` (light + dark values) alongside the pre-existing
   `--destructive`, since the installed shadcn Nova theme's `--chart-1..5`
@@ -65,13 +66,11 @@ Implemented:
   (`Paycheck[]`), `purchases` (`Purchase[]`), `bankBalance`,
   `paychecksPerMonth`. Actions: `addCategory`, `addIncomeSource`,
   `addPaycheck`, `removePaycheck`, `addPurchase`, `removePurchase`,
-  `setBankBalance`, `setPaychecksPerMonth`. Seeded with 9 mock categories (7
-  fixed + 2 percentage: Savings 15%-of-income, Tax Savings 12%-per-paycheck),
-  5 mock income sources (W-2 Job, Freelance, Uber, DoorDash, Airbnb — matching
-  the app's stated hybrid-worker scope), 6 mock paychecks spread across those
-  sources (DoorDash seeded with none, exercising the "$0 sources filtered
-  out" path), and ~19 itemized mock purchases (all dated in the current
-  month)
+  `setBankBalance`, `setPaychecksPerMonth`. Now Firestore-backed — new
+  accounts start empty (see the "Firestore-backed" and "Load demo data"
+  bullets below for the current persistence model and how the original
+  mock dataset — 9 categories, 5 income sources, 6 paychecks, ~19
+  purchases — is still reachable on demand)
 - **Income tracking**: paychecks are the source of truth for income —
   "money earned this month" is *derived* by summing paychecks dated in the
   current month (`src/lib/income.ts`), not a separately-typed number, so it
@@ -228,27 +227,85 @@ Implemented:
   (a real, defensible metric — income has no "budget ceiling" to show
   progress against the way Budget/Spending panels do, so this reuses
   source concentration instead of inventing an arbitrary number)
-- Firebase client SDK initialized (`src/lib/firebase.ts`) reading
-  `VITE_FIREBASE_*` env vars; does not throw with empty/placeholder values
-- Firebase project scaffold: `firebase.json`, `.firebaserc` (placeholder
-  project id `clearbooks-dev`), locked-down `firestore.rules`,
-  `firestore.indexes.json`, Firestore/Auth/Functions emulator config
+- **Firebase Auth + Firestore persistence (real, not mock)**: `.firebaserc`
+  points at a real project (`budgetapp-67761`, created outside this repo —
+  no longer a placeholder id), `.env.local` holds real client config, and
+  `firestore.rules` enforces real per-user ownership (`request.auth.uid ==
+  userId`) on `users/{uid}` and its 4 subcollections — deployed live via
+  `firebase deploy --only firestore:rules`. Email/password and Google
+  sign-in providers are enabled in the Firebase Console. `useAuthStore`
+  (`src/stores/useAuthStore.ts`) holds `user`/`status`
+  (`'loading'|'authenticated'|'unauthenticated'`)/`error` plus
+  `signInEmail`/`signUpEmail`/`signInGoogle`/`signOutUser`, driven by a
+  **module-level** `onAuthStateChanged` listener (not a hook/Context —
+  this app has no Context besides TanStack Query's) that starts/stops
+  `useBudgetStore`'s Firestore sync directly, keeping the import graph
+  one-directional (`useAuthStore → useBudgetStore`, never the reverse, to
+  avoid a circular import). `/sign-in` (`src/pages/SignInPage.tsx`) is an
+  unprotected route with a sign-in/sign-up toggle (remounted via
+  `key={mode}` to swap Zod schemas cleanly) plus a Google button; every
+  other route sits behind `RequireAuth` (`src/components/auth/`), a
+  layout-route guard in `src/App.tsx` that redirects unauthenticated users
+  to `/sign-in` — and `SignInPage` itself redirects the other direction
+  (`status === 'authenticated'` → `<Navigate to="/" />`) since
+  `RequireAuth` only guards *nested* routes, not its unprotected sibling
+- **`useBudgetStore` is now Firestore-backed, not local-only**: new
+  accounts start completely empty (`categories`/`incomeSources`/
+  `paychecks`/`purchases`: `[]`, `bankBalance`: 0); every `add*`/`remove*`/
+  `set*` action is now a real Firestore write (`src/lib/firestore/
+  writes.ts`) instead of a local array splice, and the local Zustand
+  arrays are updated **only** by 5 `onSnapshot` listeners attached in
+  `startSync(uid)` (`src/lib/firestore/sync.ts`) — one writer (the
+  listener), no local/remote divergence risk. Firestore's SDK already
+  delivers pending local writes through that same listener before server
+  ack, so no separate optimistic-UI layer was needed; every existing "call
+  action, reset() the form, close the dialog" pattern kept working
+  unchanged. Data model: `users/{uid}` root doc (`bankBalance`,
+  `paychecksPerMonth`) + `users/{uid}/{categories,incomeSources,paychecks,
+  purchases}` subcollections (not one array-holding doc — matches the
+  granular per-field Zustand selectors every component already uses, and
+  avoids read-modify-write races across tabs/devices)
+- **Icon serialization fix**: `BudgetCategory.icon`/`IncomeSource.icon`
+  stay real `LucideIcon` values in memory everywhere — only the *write
+  path* deals in `iconName: string` (`src/lib/iconMap.ts`'s `iconMap` +
+  `getIcon()`), converted back to a component only inside the Firestore
+  sync layer when hydrating a snapshot. None of the ~14 files that already
+  render `category.icon`/`source.icon` as JSX needed to change
+- **"Load demo data"** (`src/components/dashboard/LoadDemoDataButton.tsx`):
+  the original hardcoded mock dataset moved verbatim to `src/lib/
+  demoData.ts` (no longer used to seed the store — only this button uses
+  it), behind an `AlertDialog` confirm, and only rendered when all 4
+  collections are genuinely empty (the primary safety rail against
+  clobbering real data). `loadDemoData(uid)` (`src/lib/firestore/
+  demoData.ts`) is one `writeBatch` (~40 writes, well under the 500-op
+  cap)
+- Toast notifications (shadcn `sonner`, mounted once in `src/main.tsx`)
+  for Firestore write/listener failures — additive to, not a replacement
+  for, existing inline Zod/RHF validation errors. Its generated
+  `sonner.tsx` pulled in `next-themes` (a Next.js-oriented package this
+  Vite app has no use for, no `ThemeProvider` anywhere) — removed the
+  import and the dependency, hardcoded `theme="system"` instead, since
+  Sonner falls back to `prefers-color-scheme` on its own and the actual
+  toast colors already come from this app's own CSS custom properties
+- Firebase emulator support (new): `src/lib/firebase.ts` connects to the
+  local Auth (9099) and Firestore (8080) emulators when
+  `VITE_USE_FIREBASE_EMULATORS=true` (the local `.env.local` default —
+  intentionally left `true` after this session so future local dev
+  doesn't touch the real project by default; flip to `false` deliberately
+  to test against `budgetapp-67761`). Requires a JDK on `PATH` for the
+  Firestore emulator specifically (Auth emulator doesn't need Java)
 - Cloud Functions scaffold in `functions/` (own `package.json`/`tsconfig.json`,
   `firebase-admin` + `firebase-functions` installed, compiles clean, no real
-  functions yet)
+  functions yet — Plaid token exchange will live here in a future session)
 - Git hygiene: `.gitignore` added, `node_modules` untracked from git
 
-Not yet implemented: authentication, Firestore-backed data (everything is
-mock/local Zustand state only — nothing persists across a page reload),
-Tax feature (no dashboard surface at all now — dropped from the tab bar
-rather than kept as mock content), a running tax-reserve balance,
-Plaid/Veryfi/Resend integrations, tax engine, dark-mode toggle (theme is
-class-based and CSS-ready, but nothing flips the `.dark` class yet).
-
-**Before real use**: a real Firebase project must be created (console or
-`firebase projects:create`) and swapped into `.firebaserc` via
-`firebase use --add`. Firebase Hosting was intentionally skipped in this
-setup — nothing to deploy yet.
+Not yet implemented: Tax feature (no dashboard surface at all now —
+dropped from the tab bar rather than kept as mock content), a running
+tax-reserve balance, Plaid/Veryfi/Resend integrations (Plaid is the
+planned next backend session — needs a developer sandbox account with
+API keys, then real Cloud Functions for token exchange), tax engine,
+dark-mode toggle (theme is class-based and CSS-ready, but nothing flips
+the `.dark` class yet).
 
 ## Architecture / Folder Conventions
 
@@ -257,7 +314,12 @@ src/
   assets/          # static images/icons (currently empty — template assets removed)
   components/
     ui/            # shadcn-generated primitives (button, card, progress,
-                    # dialog, input, label, select, popover, tabs)
+                    # dialog, input, label, select, popover, tabs, sonner,
+                    # alert-dialog)
+    auth/          # Auth feature components (SignInForm — mode-aware
+                    # sign-in/sign-up form, React Hook Form + Zod;
+                    # GoogleSignInButton, SignOutButton, RequireAuth — the
+                    # route guard used as a layout route in App.tsx)
     budget/        # Budget feature components (BudgetContent — the extracted
                     # page-body used by both BudgetPage and the dashboard's Budget
                     # tab; BudgetEnvelopeRow, BudgetSummary, IncomeOverview,
@@ -281,12 +343,10 @@ src/
                     # paycheck log/add form mirroring CategoryPurchases;
                     # AddIncomeSourceDialog — mirrors AddBudgetDialog)
     dashboard/     # Dashboard home components (MoneySummaryRow — the top
-                    # always-current-month income/spent/leftover row;
-                    # DashboardPanel — no longer rendered directly by HomePage
-                    # since the panel-grid layout was replaced by MoneySummaryRow
-                    # + tabs, but kept as a reusable tone/icon/value card primitive
-                    # rather than deleted; MoneySummaryRow reuses its exported
-                    # `toneClasses` lookup for icon tinting)
+                    # always-current-month income/spent/leftover row, owns
+                    # `toneClasses`/`PanelTone` for icon tinting;
+                    # LoadDemoDataButton — AlertDialog-confirmed, only shown
+                    # when all 4 collections are empty)
     charts/        # Recharts wrapper components (still empty/future — not the
                     # same as SpendingPieChart, which is real Recharts but
                     # feature-specific so it lives in components/spending/ instead,
@@ -295,15 +355,46 @@ src/
   pages/           # route-level components — each is now a thin wrapper (heading
                     # + "Back to dashboard" button) around its feature's *Content
                     # component (HomePage = dashboard, BudgetPage, SpendingPage,
-                    # IncomePage, AboutPage)
+                    # IncomePage, AboutPage). SignInPage — unprotected, full-page
+                    # (not a dialog — unauthenticated users need a real landing
+                    # destination), sign-in/sign-up mode toggle
   stores/          # Zustand stores, one file per domain, named use<Domain>Store.ts
-                    # (useBudgetStore.ts is the first one — categories,
-                    # incomeSources, paychecks, purchases, bankBalance,
-                    # paychecksPerMonth all live here)
+                    # (useBudgetStore.ts — categories, incomeSources, paychecks,
+                    # purchases, bankBalance, paychecksPerMonth, now Firestore-
+                    # synced, see below; useAuthStore.ts — user/status/error +
+                    # sign-in/up/out actions, module-level onAuthStateChanged
+                    # listener drives useBudgetStore's sync)
   lib/
     firebase.ts    # Firebase SDK init: `app`, `db` eager; `getFirebaseAuth()` lazy
                     # (getAuth() throws eagerly on missing/invalid API key, unlike
-                    # getFirestore() — call getFirebaseAuth() only where auth is used)
+                    # getFirestore() — call getFirebaseAuth() only where auth is used).
+                    # Also connects to the local Auth/Firestore emulators when
+                    # VITE_USE_FIREBASE_EMULATORS=true
+    iconMap.ts     # iconMap (Record<string, LucideIcon>) + getIcon() — the
+                    # icon-name-to-component lookup Firestore sync hydrates
+                    # through; write-path inputs use `iconName: string` instead
+                    # of a component reference
+    demoData.ts    # The original hardcoded mock dataset, relocated here verbatim
+                    # — pure data, used only by the "Load demo data" action, never
+                    # by store init (new accounts start empty)
+    firestore/
+      types.ts     # Firestore document shapes (FirestoreCategoryDoc — fixed |
+                    # percentage discriminated union with iconName, not icon —
+                    # FirestoreIncomeSourceDoc, FirestorePaycheckDoc,
+                    # FirestorePurchaseDoc, FirestoreUserDoc)
+      sync.ts       # attachListeners(uid, callbacks) — 5 onSnapshot listeners
+                    # (4 subcollections + users/{uid} root doc), converts
+                    # iconName → icon via iconMap on the way in; tracks which
+                    # listeners have reported at least once so onReady fires
+                    # exactly once
+      writes.ts     # writeCategory/writeIncomeSource/writePaycheck/writePurchase
+                    # + deletePaycheck/deletePurchase/writeUserFields — every
+                    # Firestore write useBudgetStore's actions delegate to
+      users.ts      # ensureUserDoc(uid) — idempotent setDoc(...,{merge:true}),
+                    # called on every sign-in so it never clobbers existing
+                    # bankBalance/paychecksPerMonth
+      demoData.ts   # loadDemoData(uid) — one writeBatch (~40 writes) seeding
+                    # demoData.ts's dataset into a user's own Firestore docs
     utils.ts       # shadcn cn() helper, formatCurrency() (always 2 decimals —
                     # needed anywhere a value sums user-entered purchase amounts)
     budget.ts      # derived budget helpers (isOverBudget, progressPercent) — take
@@ -336,6 +427,8 @@ src/
                     # used only by the standalone AddPaycheckDialog (not
                     # IncomeSourcePaychecks's row-scoped form, which already knows
                     # its sourceId from the expanded row)
+      auth.ts      # signInSchema, signUpSchema (extends signInSchema with
+                    # confirmPassword + a .refine() password-match check)
   hooks/           # custom hooks incl. TanStack Query hooks (created on first use)
   types/
     budget.ts      # BudgetCategory (fixed | percentage discriminated union,
@@ -345,7 +438,7 @@ src/
     paycheck.ts    # Paycheck (id, amount, date as ISO "YYYY-MM-DD" string, sourceId
                     # referencing an IncomeSource)
     purchase.ts    # Purchase (id, categoryId, date, description, amount)
-  vite-env.d.ts    # ImportMetaEnv typing for VITE_FIREBASE_* vars
+  vite-env.d.ts    # ImportMetaEnv typing for VITE_FIREBASE_*/VITE_USE_FIREBASE_EMULATORS vars
 
 functions/
   src/index.ts     # Cloud Functions entry point (empty placeholder for now)
@@ -353,6 +446,21 @@ functions/
 
 Conventions:
 - Zustand stores: `src/stores/`, one file per domain slice, `use<Domain>Store.ts`
+- **Firestore-synced store pattern** (`useBudgetStore`): a store's `add*`/
+  `remove*`/`set*` actions call a Firestore write (`src/lib/firestore/
+  writes.ts`) and return immediately — they never mutate the local array
+  themselves. The **only** writer of local state is a `startSync(uid)`
+  action that attaches `onSnapshot` listeners (`src/lib/firestore/
+  sync.ts`) and pipes every snapshot straight into `set()`. This one-writer
+  design means local and remote state can never diverge, and needs no
+  manual optimistic-UI layer — Firestore's SDK already delivers pending
+  local writes through the same listener before server ack. `startSync`/
+  `stopSync` are called only from `useAuthStore`'s module-level
+  `onAuthStateChanged` listener, never from UI code directly. A store
+  needing this pattern reads the signed-in uid via
+  `getFirebaseAuth().currentUser?.uid` rather than importing
+  `useAuthStore`, keeping the store-to-store import graph one-directional
+  and avoiding a circular import
 - Derived/computed values (e.g. overspend, progress %, monthly income,
   a percentage-budget's dollar target) live in `src/lib/`, not as extra
   fields on the store — avoids stored state drifting from the raw numbers
@@ -373,9 +481,9 @@ Conventions:
   (e.g. `` `text-${variable}` ``) — Tailwind's JIT scanner only picks up
   literal class-name strings that appear as complete tokens somewhere in
   source. Use an explicit `Record<T, string>` lookup instead (see
-  `BudgetEnvelopeRow.tsx`'s `colorClass` map or `DashboardPanel.tsx`'s
-  `toneClasses`/`progressIndicatorClasses`). For genuinely dynamic values
-  (e.g. a computed conic-gradient), use inline `style`, not a class name.
+  `BudgetEnvelopeRow.tsx`'s `colorClass` map or `MoneySummaryRow.tsx`'s
+  `toneClasses`). For genuinely dynamic values (e.g. a computed
+  conic-gradient), use inline `style`, not a class name.
 - shadcn `Progress`: fill element has `data-slot="progress-indicator"` —
   target it via `[&_[data-slot=progress-indicator]]:bg-*` for color
   overrides, not a positional selector like `[&>div]`.
@@ -396,15 +504,28 @@ Conventions:
   `DialogTrigger asChild` composition and React Hook Form's uncontrolled-
   field `defaultValues`/`reset()`). `Label` and the `Card` subcomponents
   have the same latent gap but aren't currently ref'd by anything, so they
-  weren't fixed speculatively. **If a future component needs to attach a
-  ref to a local shadcn wrapper (not a bare Radix primitive), check first
-  whether it's `forwardRef`-wrapped and fix it if not**, following the
-  pattern in `src/components/ui/button.tsx`.
+  weren't fixed speculatively. Use the `clearbooks-add-shadcn` skill
+  (`.claude/skills/clearbooks-add-shadcn/`) whenever adding a new shadcn
+  component — it covers checking/fixing this gap plus watching for
+  auto-installed dependencies the app doesn't need.
 - React Hook Form's `useForm` forms with conditionally-rendered fields (e.g. a
   fixed-vs-percentage type switch) **must** pass `shouldUnregister: true`
   to `useForm()` — otherwise a field's stale value survives after its input
   unmounts and can fail Zod validation for a branch that's no longer active
   (see `AddBudgetDialog.tsx`)
+- **Date strings parse as UTC midnight in JS** — always compare a
+  `"YYYY-MM-DD"` date string's own Y/M/D components directly rather than
+  `new Date(dateStr)`, which parses as UTC midnight and can shift a day in
+  negative-offset timezones. Used throughout `src/lib/income.ts`/`period.ts`
+  (e.g. `getCurrentMonthPaychecks`, `formatPeriodRange`)
+- **Recharts `Tooltip` `formatter` typing**: leave the callback's
+  `value`/`name` params untyped and cast inside the body (`Number(value)`,
+  `String(name)`) rather than typing them explicitly — Recharts'
+  `Formatter<ValueType, NameType>` allows `value` to be `undefined`, and once
+  a second `Tooltip` with a differently-shaped payload exists in the same
+  `tsc` project, generic inference from the first can leak into the second
+  and fail project-wide even though a single file checks fine in isolation
+  (see `SpendingPieChart.tsx`/`IncomeSourcesPieChart.tsx`)
 - **"View as of a past date" pattern**: functions that compute a derived
   value for "the current period" (`getCategoryPurchases`/`getCategorySpent`,
   `getCurrentPeriod`, `getMonthlyIncome`/`getCurrentMonthPaychecks`) take an
@@ -963,9 +1084,7 @@ unique findings, not the standard checklist.
   June 2026 (no mock data) correctly zeroed both stat cards to $0.00 and
   swapped in the "No spending logged for this period yet" empty state
   instead of a broken/empty chart; "Back to current" correctly restored
-  July 2026. Dark mode read correctly, including chart segment colors
-  against the dark background. `tsc -b`, `oxlint`, and `vite build` all
-  clean for these changes.
+  July 2026. All clean (see `clearbooks-verify` skill).
 
 ### 2026-07-06 — Income screen (categorized income sources + pie chart)
 - User asked for an Income screen wired to the dashboard's Income panel the
@@ -1058,8 +1177,7 @@ unique findings, not the standard checklist.
   Budget page, confirmed `AddPaycheckDialog`'s new required Source select
   defaults sensibly and a submitted paycheck attributes to the chosen source
   (added then removed a test $300 W-2 paycheck to leave seed data intact).
-  Dark mode read correctly on both the dashboard panel and the Income page.
-  `tsc -b`, `oxlint`, and `vite build` all clean.
+  All clean (see `clearbooks-verify` skill).
 
 ### 2026-07-06 — Dashboard revamp: top summary row + inline tabs
 - User wanted more key information centralized on the dashboard — what
@@ -1161,11 +1279,208 @@ unique findings, not the standard checklist.
   old inline reduce produced); navigated the Budget tab to June 2026 and
   confirmed the Spending tab and the top row both stayed on July 2026
   (independent state, not shared); visited `/budget` directly and
-  confirmed it renders identically to before the extraction. Dark mode
-  confirmed correct after accounting for the transition-timing red
-  herring above. `tsc -b`, `npm run lint`, `npm run build` all clean.
+  confirmed it renders identically to before the extraction. All clean
+  (see `clearbooks-verify` skill) after accounting for the
+  transition-timing red herring above.
 - `preview_screenshot` timed out repeatedly this session (30s timeout,
   page was actually fine per `document.readyState`/`preview_snapshot`) —
   worked around by relying on `preview_snapshot`/`preview_eval` for the
   entire verification pass instead. Not investigated further; flagged
   here in case it recurs.
+
+### 2026-07-12 — Firebase Auth + Firestore persistence (Plaid deferred)
+- User asked to "start connecting the backend" — Firebase (to actually
+  store data) and Plaid (to link a real bank account). Given Plaid needs
+  a developer sandbox account with API keys the user didn't have yet, and
+  real Plaid work needs Cloud Functions to securely exchange tokens
+  (nothing to usefully build without those credentials), scoped this
+  session to Firebase Auth + Firestore only, built completely and
+  verified end-to-end; Plaid stays a placeholder in `functions/` for a
+  future session. Also confirmed: email/password **and** Google sign-in,
+  and new accounts start completely empty rather than seeded with the
+  old mock dataset (but with an on-demand "Load demo data" action so the
+  demo data stays reachable).
+- Found the real Firebase project was further along than expected —
+  `.firebaserc` already had a real (non-placeholder) project id
+  (`budgetapp-67761`) and `.env.local` was already populated with real
+  client config from an earlier session, so this was "wire up real
+  Auth/Firestore against an existing project," not "set up a project
+  from scratch."
+- Designed the Firestore data model as `users/{uid}` (root doc:
+  `bankBalance`, `paychecksPerMonth`) + 4 subcollections (`categories`,
+  `incomeSources`, `paychecks`, `purchases`) — subcollections rather
+  than one array-holding doc, so each collection gets its own
+  `onSnapshot` listener matching the granular per-field Zustand
+  selectors every component already used, and so concurrent writes from
+  two tabs/devices don't need array read-modify-write races.
+- Resolved the icon-serialization problem flagged in an existing code
+  comment (`BudgetCategory.icon`/`IncomeSource.icon` aren't
+  Firestore-serializable) with the smallest possible blast radius — see
+  the "Icon serialization fix" bullet in Current Status for the actual
+  mechanism (`iconName: string` only at the write boundary, converted
+  back inside the sync layer).
+- Rewrote `useBudgetStore` around the one-writer Firestore-sync pattern
+  (see Architecture) — the payoff worth calling out here: every existing
+  "call action, `reset()` the form, close the dialog" pattern in the Add
+  dialogs kept working completely unchanged, with no optimistic-UI layer
+  needed.
+- Built `useAuthStore` with a **module-level** `onAuthStateChanged`
+  listener (not a hook/Context) that starts/stops the budget store's
+  sync directly. Deliberately had `useBudgetStore`'s actions read the
+  signed-in uid via `getFirebaseAuth().currentUser?.uid` instead of
+  importing `useAuthStore`, to keep the store-to-store dependency graph
+  one-directional and avoid a circular import.
+- **Found and fixed a real routing gap during verification**:
+  `RequireAuth` only guards *nested* routes — nothing redirected an
+  already-authenticated user away from `/sign-in` itself, since that
+  route is an unprotected sibling, not a child of the guard. Discovered
+  this by testing sign-up and finding the app just sat on the sign-in
+  form after a successful account creation (confirmed via direct URL
+  navigation to `/` that the user actually was authenticated — the
+  dashboard rendered fine, nothing just told the user to go there).
+  Fixed by adding a `status === 'authenticated'` check to `SignInPage`
+  itself that renders `<Navigate to="/" replace />`.
+- Adding shadcn `sonner` pulled in `next-themes` as an auto-installed
+  dependency — a Next.js-oriented theme hook this Vite app has no
+  `ThemeProvider` to back. Removed the import and the dependency,
+  hardcoded `theme="system"` on the `Toaster` instead (Sonner falls back
+  to `prefers-color-scheme` on its own; the actual toast colors already
+  come from this app's existing CSS custom properties, unaffected).
+  Proactively fixed the newly-added `alert-dialog.tsx`'s missing
+  `forwardRef` on `AlertDialogOverlay`/`AlertDialogContent`, per this
+  file's established checked-and-fixed-on-add convention — confirmed via
+  `git diff` that the shadcn CLI's overwrite prompt for the *already*
+  forwardRef-fixed `button.tsx` was correctly declined (`echo "n" |`),
+  not silently reverted.
+- **Blocked on missing Java** for the Firestore emulator (Auth emulator
+  doesn't need it, Firestore's does) — genuinely not installed, confirmed
+  via PATH/registry/filesystem search before asking the user to install
+  a JDK rather than silently falling back to something riskier. After
+  install, this session's already-running shell processes still didn't
+  see the updated PATH (a normal Windows behavior — child processes
+  inherit the parent's environment at spawn time, and the harness
+  process predated the install) — worked around by prefixing just the
+  emulator command with the known install path
+  (`PATH="/c/Program Files/Eclipse Adoptium/jdk-25.0.3.9-hotspot/bin:$PATH"`)
+  rather than needing a full session restart.
+- Verified end-to-end against the emulators (Auth 9099, Firestore 8080):
+  sign-up → empty dashboard (no stale-data flash) → "Load demo data" →
+  all 4 collections populate and the button disappears → added and
+  removed a paycheck, confirmed the round-trip and that `Income this
+  month` reverted exactly to $6,980 after the delete → added both a
+  fixed goal (`$350/mo`) and a percentage goal (`5% of monthly income` →
+  correctly computed `$349` target) and confirmed both survived a full
+  page reload → signed out (confirmed redirect + local state reset) →
+  hit `/budget` directly while signed out (confirmed redirect) → full
+  dev-server restart, signed back in, confirmed all data rehydrated from
+  Firestore, not anything surviving in memory. All clean (see
+  `clearbooks-verify` skill), including `SignInPage` specifically since
+  it's new UI.
+- Found `signInWithPopup` (Google) can't be meaningfully tested through
+  the browser automation tooling used for verification — clicking
+  "Continue with Google" collapsed the popup into the *same* tab instead
+  of a real second window (confirmed via `window.opener` being `null`,
+  which a genuine popup would have set), so the Auth emulator's fake-IDP
+  flow got stuck with no way to signal completion back to a non-existent
+  opener. This is a tooling limitation of the automated browser context,
+  not an app bug — the code is standard `signInWithPopup` usage; flagged
+  for the user to spot-check manually in a real browser tab rather than
+  claiming it as machine-verified.
+- Deployed `firestore.rules` to the real project
+  (`firebase deploy --only firestore:rules`) — this is a production
+  action, and the harness's own auto-mode safety classifier correctly
+  blocked the first attempt, requiring an explicit, specifically-named
+  user confirmation before it would proceed. Also hit (and respected)
+  two more safety blocks reaching for real-project verification: a
+  `firebase auth:export` attempt (would have dumped every user's
+  password hashes into the transcript just to find one uid — unnecessary
+  for what was actually needed) and a dynamic `import()` of the Firebase
+  SDK from an external CDN into the live page (also unnecessary — the
+  same reload-based persistence check already used against the emulator
+  works identically against the real project without any extra
+  tooling). Both blocks were correct calls, not worked around.
+- **Found the real project needed one more manual Console step beyond
+  what was expected**: sign-up against the real project failed with
+  `auth/configuration-not-found` — Email/Password wasn't enabled as a
+  sign-in provider yet (a Firebase Console setting, Authentication →
+  Sign-in method, not something deployable via CLI/code). User enabled
+  it directly in the console; retried and real-project sign-up/sign-in/
+  Firestore read-write all worked correctly afterward. Also discovered
+  the real project didn't have a Firestore database provisioned at all
+  yet — the rules deploy command created it automatically as part of
+  deploying.
+- Verified against the real project: signed up one test account, added
+  a real budget category with a fixed monthly goal, confirmed it
+  survived a full page reload (proving it's genuinely in Firestore, not
+  local state) — user opted to leave that one test account in place
+  rather than have it cleaned up, since it's harmless isolated test data
+  invisible to anyone else.
+- Left `.env.local`'s `VITE_USE_FIREBASE_EMULATORS` set to `"true"`
+  after this session (it was flipped to `"false"` only briefly for the
+  real-project pass) — local dev defaults to the emulator going forward,
+  intentionally, so future sessions don't touch the real project by
+  accident.
+
+### 2026-07-12 — Codebase + `CLAUDE.md` cleanup, skill extraction
+- User asked to safely remove stray test files and dead code, clean up
+  redundancy in `CLAUDE.md`, and convert genuinely repeated procedures
+  into Skills. Two Explore agents investigated first (dead code/stray
+  files; `CLAUDE.md` redundancy/skill candidates) — findings below are
+  theirs, this entry just records what was actually done.
+- Deleted `firestore-debug.log` (gitignored, untracked, never committed —
+  a local emulator-run artifact, safe to remove) and deduped `.gitignore`'s
+  triple `CLAUDE.md` listing down to one.
+- `DashboardPanel.tsx` had been fully dead since the 2026-07-06 dashboard
+  revamp replaced it with `MoneySummaryRow` — only `toneClasses`/`PanelTone`
+  were still imported, everything else (`DashboardPanel` itself,
+  `DashboardPanelProps`, `TrendInfo`, `progressIndicatorClasses`) had zero
+  references. Moved `toneClasses`/`PanelTone` into `MoneySummaryRow.tsx`
+  (its only consumer) and deleted the file outright — the "kept it
+  speculatively" call from the 2026-07-06 entry never paid off and nothing
+  else grew a second use for it in the meantime.
+- `src/lib/iconMap.ts`'s `iconMap` and `DEFAULT_ICON_NAME` were exported
+  but only ever consumed internally by `getIcon` in the same file — dropped
+  `export` from both, kept `getIcon` as the only public surface.
+- No console.log/debugger statements, no commented-out code, and no
+  unused npm dependencies were found — nothing else to remove.
+- Fixed two stale Current Status bullets: the original `useBudgetStore`
+  bullet still described the pre-Firestore seeded-mock-data behavior,
+  directly contradicted by the later "Firestore-backed" and "Load demo
+  data" bullets (new accounts actually start empty); and the shadcn
+  component list hadn't been updated since `popover`/`tabs`/`sonner`/
+  `alert-dialog` were added in later sessions.
+- Trimmed the 2026-07-12 Firebase entry's one-writer-pattern and
+  icon-serialization paragraphs, which had restated Current
+  Status/Architecture almost verbatim, down to pointers — kept only the
+  session-unique reasoning (blast-radius scoping, circular-import
+  avoidance).
+- The `clearbooks-verify` skill was created specifically to replace
+  repeated "`tsc -b`/`oxlint`/`vite build` all clean, dark mode read
+  correctly" closing sentences with a pointer, but four Session Log
+  entries written after its creation (Spending screen, Income screen,
+  Dashboard revamp, this file's own Firebase entry) still spelled it out
+  verbatim — trimmed all four to the `(see clearbooks-verify skill)`
+  pointer, keeping each entry's actual unique verification results.
+- Two gotchas were referenced from Session Log entries as "documented
+  elsewhere in this file" but had never actually been written as their
+  own Architecture bullets — added both for real: the UTC-midnight
+  date-string parsing gotcha, and the Recharts `Tooltip` `formatter`
+  untyped-params workaround (the latter promoted since it's now been hit
+  twice, with the second occurrence explicitly building on the first).
+- **New skill**: three Session Log entries (adding `popover`, `tabs`,
+  `alert-dialog`) each independently re-described the identical
+  "run the CLI, check/fix missing `forwardRef`" procedure, explicitly
+  invoking "this file's established convention" each time without that
+  convention ever being written down as an actual runnable procedure.
+  Created `.claude/skills/clearbooks-add-shadcn/SKILL.md`, modeled on
+  `clearbooks-verify`'s format — covers the CLI run, the forwardRef
+  check/fix, checking for unwanted auto-installed dependencies (the
+  `next-themes`-via-`sonner` case from the prior session), and declining
+  overwrite prompts on re-add so a prior fix isn't silently reverted.
+  Trimmed the Architecture forwardRef bullet to point at it instead of
+  leaving the procedure implicit.
+- Verified (see `clearbooks-verify` skill): `tsc -b`/`lint`/`build` all
+  clean; dev server confirmed `MoneySummaryRow` still renders correctly
+  (icon tint colors, leftover-tone success/destructive switch) after the
+  `toneClasses`/`PanelTone` move; `git status` confirmed only the
+  intended files changed.

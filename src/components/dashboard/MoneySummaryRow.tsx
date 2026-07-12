@@ -1,10 +1,25 @@
 import { Banknote, PiggyBank, Receipt } from 'lucide-react'
 import { Card, CardContent } from '@/components/ui/card'
-import { toneClasses, type PanelTone } from '@/components/dashboard/DashboardPanel'
 import { useBudgetStore } from '@/stores/useBudgetStore'
 import { getLeftoverCash, getMonthlyIncome } from '@/lib/income'
 import { getTotalSpent } from '@/lib/spending'
 import { cn, formatCurrency } from '@/lib/utils'
+
+export type PanelTone = 'info' | 'success' | 'warning' | 'destructive'
+
+export const toneClasses: Record<
+  PanelTone,
+  { icon: string; iconBg: string; text: string }
+> = {
+  info: { icon: 'text-info', iconBg: 'bg-info/10', text: 'text-info' },
+  success: { icon: 'text-success', iconBg: 'bg-success/10', text: 'text-success' },
+  warning: { icon: 'text-warning', iconBg: 'bg-warning/10', text: 'text-warning' },
+  destructive: {
+    icon: 'text-destructive',
+    iconBg: 'bg-destructive/10',
+    text: 'text-destructive',
+  },
+}
 
 // Always the current month, independent of whatever historical month any
 // dashboard tab below might be browsing to — this is the at-a-glance strip,

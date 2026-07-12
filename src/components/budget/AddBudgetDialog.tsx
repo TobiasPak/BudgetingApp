@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { useForm, Controller } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
-import { Plus, Tag } from 'lucide-react'
+import { Plus } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import {
   Dialog,
@@ -66,7 +66,7 @@ export function AddBudgetDialog() {
     const color = chartColors[categories.length % chartColors.length]
     const base = {
       name: data.name,
-      icon: Tag,
+      iconName: 'Tag',
       color,
       isCustom: true as const,
       resetDay: data.resetDay,

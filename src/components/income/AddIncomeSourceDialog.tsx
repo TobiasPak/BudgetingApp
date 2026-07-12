@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
-import { Plus, Banknote } from 'lucide-react'
+import { Plus } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import {
   Dialog,
@@ -49,7 +49,7 @@ export function AddIncomeSourceDialog() {
 
   function onSubmit(data: AddIncomeSourceInput) {
     const color = chartColors[incomeSources.length % chartColors.length]
-    addIncomeSource({ name: data.name, icon: Banknote, color, isCustom: true })
+    addIncomeSource({ name: data.name, iconName: 'Banknote', color, isCustom: true })
     reset({ name: '' })
     setOpen(false)
   }
