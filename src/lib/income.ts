@@ -1,5 +1,7 @@
+import { getTotalSpent } from './spending'
 import type { Paycheck } from '@/types/paycheck'
 import type { BudgetCategory } from '@/types/budget'
+import type { Purchase } from '@/types/purchase'
 
 // `new Date("YYYY-MM-DD")` parses the string as UTC midnight, which can
 // display as the previous day in negative UTC-offset timezones. Comparing
@@ -28,6 +30,21 @@ export function getMonthlyIncome(
 
 export function getYearlyProjectedIncome(monthlyIncome: number): number {
   return monthlyIncome * 12
+}
+
+// Actual cash leftover from this month's earnings after spending — distinct
+// from a category's "remaining budget" (budgeted minus spent), which is a
+// different concept scoped to the Budget domain, not income.
+export function getLeftoverCash(
+  paychecks: Paycheck[],
+  categories: BudgetCategory[],
+  purchases: Purchase[],
+  reference: Date = new Date()
+): number {
+  return (
+    getMonthlyIncome(paychecks, reference) -
+    getTotalSpent(categories, purchases, reference)
+  )
 }
 
 // This source's paychecks within the month containing `reference`, most

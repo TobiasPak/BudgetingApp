@@ -7,7 +7,7 @@ import {
   getMonthlyIncome,
   getMonthlyTarget,
 } from '@/lib/income'
-import { getCategorySpent } from '@/lib/purchases'
+import { getTotalSpent } from '@/lib/spending'
 import {
   CategoryBreakdownBar,
   type BudgetMetric,
@@ -44,10 +44,7 @@ export function BudgetSummary({ referenceDate }: BudgetSummaryProps) {
     (sum, c) => sum + getMonthlyTarget(c, targetContext),
     0
   )
-  const monthlySpent = categories.reduce(
-    (sum, c) => sum + getCategorySpent(purchases, c, referenceDate),
-    0
-  )
+  const monthlySpent = getTotalSpent(categories, purchases, referenceDate)
   const yearlyBudgeted = monthlyBudgeted * 12
   const yearlySpent = monthlySpent * 12
   const spentPercentOfIncome =

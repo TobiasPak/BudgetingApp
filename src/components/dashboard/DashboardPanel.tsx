@@ -7,7 +7,10 @@ import { cn } from '@/lib/utils'
 
 export type PanelTone = 'info' | 'success' | 'warning' | 'destructive'
 
-const toneClasses: Record<PanelTone, { icon: string; iconBg: string; text: string }> = {
+export const toneClasses: Record<
+  PanelTone,
+  { icon: string; iconBg: string; text: string }
+> = {
   info: { icon: 'text-info', iconBg: 'bg-info/10', text: 'text-info' },
   success: { icon: 'text-success', iconBg: 'bg-success/10', text: 'text-success' },
   warning: { icon: 'text-warning', iconBg: 'bg-warning/10', text: 'text-warning' },

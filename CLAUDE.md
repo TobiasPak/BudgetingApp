@@ -47,7 +47,7 @@ what the installed create-vite version ships.
 
 ## Current Status
 
-**Budget envelopes + dashboard home + income tracking + month/year ledger navigation + spending screen + income screen. Foundation otherwise unchanged.**
+**Budget envelopes + revamped tabbed dashboard home + income tracking + month/year ledger navigation + spending screen + income screen. Foundation otherwise unchanged.**
 
 Implemented:
 - Project scaffold (Vite + React 18 + TypeScript), clean `npm install`
@@ -140,17 +140,37 @@ Implemented:
   the new cycle just stops counting, no stored total to zero out (this
   replaced an earlier `periodStart`/`checkPeriodResets` polling mechanism
   that's no longer needed — see Session Log)
-- **Dashboard home** (`/`): 3-column layout, sized to fill the viewport at
-  desktop widths (`md:h-screen` + flex/grid stretching, mobile keeps a
-  normal scrolling stack) — centered "money overview" donut (Spent +
-  Remaining budget derived from `useBudgetStore`; Available balance now
-  real too, from `bankBalance`; Tax reserve remains a mock constant, no
-  running tax-reserve total exists yet) flanked by 4 tall panels (Spending,
-  Budget, Income, Tax). Spending, Budget, and Income panels are all
-  interactive (link to `/spending`, `/budget`, `/income` respectively) and
-  show real derived totals; Tax still renders full mock content (trend
-  arrows, insight lines) but isn't clickable — that domain has no
-  store/feature yet
+- **Dashboard home revamp** (`/`): replaced the old 3-column
+  donut+4-panels layout with a top `MoneySummaryRow` (one wide card, 3
+  segments: Income this month, Spent this month + % of income, Left over
+  — `getLeftoverCash` in `src/lib/income.ts`, `monthlyIncome -
+  totalSpent`, distinct from the unrelated "remaining budget" =
+  budgeted-minus-spent concept still used on the Budget tab) plus a
+  shadcn `Tabs` bar (Spending/Budget/Income) directly below it, with the
+  selected tab's full page content rendered inline instead of navigating
+  to a separate route. `MoneySummaryRow` always shows the *current*
+  month regardless of what historical month any tab below is browsing
+  to — same "dashboard live content always shows now" principle as
+  before, just relocated from 4 panels to one row. Tax was dropped
+  entirely rather than carried forward as a disabled tab — it was 100%
+  mock content with no backing feature, and a placeholder tab promising
+  a nonexistent feature isn't better than no tab; `CLAUDE.md`'s "Not yet
+  implemented" list still tracks it. Default active tab is Spending,
+  since "where is my money going" was the dashboard revamp's central
+  ask. `MoneyOverviewCard` (the old hand-rolled conic-gradient donut,
+  one of whose 4 slices was a hardcoded mock "Tax reserve" number) was
+  deleted outright, fully superseded
+- **Page-content extraction for dashboard tabs**: `BudgetPage`/
+  `SpendingPage`/`IncomePage` were each split into a thin route wrapper
+  (heading + "Back to dashboard" button, unchanged) and a new
+  `BudgetContent`/`SpendingContent`/`IncomeContent` component owning
+  everything below that (its own `referenceDate` state, `MonthYearPicker`,
+  and all feature content) — the standalone `/budget`/`/spending`/`/income`
+  routes still exist and render identically to before, just via the thin
+  wrapper now. The same `*Content` components are also what the dashboard's
+  tabs render directly, so each tab gets a fully independent mount with its
+  own month-navigation state, with no props threaded down from `HomePage`
+  and no risk of one tab's browsed-to month leaking into another
 - **Spending screen** (`/spending`): mirrors the Budget page's shell — same
   `MonthYearPicker` reused as-is for past-month history, no separate
   "spending period" concept introduced. Two clickable stat cards (`Monthly
@@ -220,10 +240,10 @@ Implemented:
 
 Not yet implemented: authentication, Firestore-backed data (everything is
 mock/local Zustand state only — nothing persists across a page reload),
-Tax feature (dashboard panel is static mock content), a running
-tax-reserve balance, Plaid/Veryfi/Resend integrations, tax engine,
-dark-mode toggle (theme is class-based and CSS-ready, but nothing
-flips the `.dark` class yet).
+Tax feature (no dashboard surface at all now — dropped from the tab bar
+rather than kept as mock content), a running tax-reserve balance,
+Plaid/Veryfi/Resend integrations, tax engine, dark-mode toggle (theme is
+class-based and CSS-ready, but nothing flips the `.dark` class yet).
 
 **Before real use**: a real Firebase project must be created (console or
 `firebase projects:create`) and swapped into `.firebaserc` via
@@ -237,32 +257,45 @@ src/
   assets/          # static images/icons (currently empty — template assets removed)
   components/
     ui/            # shadcn-generated primitives (button, card, progress,
-                    # dialog, input, label, select, popover)
-    budget/        # Budget feature components (BudgetEnvelopeRow, BudgetSummary,
-                    # IncomeOverview, AddBudgetDialog, AddPaycheckDialog,
-                    # CategoryPurchases — the expand-on-click purchase log/add form,
-                    # MonthYearPicker — prev/next + popover month/year selector,
-                    # CategoryBreakdownBar — stacked bar + legend driven by
-                    # BudgetSummary's 3 clickable metric cards)
-    spending/      # Spending feature components (SpendingSummary — 2 clickable
-                    # metric cards driving SpendingPieChart below, same pattern as
+                    # dialog, input, label, select, popover, tabs)
+    budget/        # Budget feature components (BudgetContent — the extracted
+                    # page-body used by both BudgetPage and the dashboard's Budget
+                    # tab; BudgetEnvelopeRow, BudgetSummary, IncomeOverview,
+                    # AddBudgetDialog, AddPaycheckDialog, CategoryPurchases — the
+                    # expand-on-click purchase log/add form, MonthYearPicker —
+                    # prev/next + popover month/year selector, CategoryBreakdownBar
+                    # — stacked bar + legend driven by BudgetSummary's 3 clickable
+                    # metric cards)
+    spending/      # Spending feature components (SpendingContent — the extracted
+                    # page-body used by both SpendingPage and the dashboard's
+                    # Spending tab; SpendingSummary — 2 clickable metric cards
+                    # driving SpendingPieChart below, same pattern as
                     # BudgetSummary/CategoryBreakdownBar; SpendingPieChart — first
                     # real Recharts usage in the app, a donut + legend)
-    income/        # Income feature components (IncomeSummary — 2 clickable metric
-                    # cards driving IncomeSourcesPieChart, same pattern as
-                    # SpendingSummary; IncomeSourceRow — log-row list item mirroring
+    income/        # Income feature components (IncomeContent — the extracted
+                    # page-body used by both IncomePage and the dashboard's Income
+                    # tab; IncomeSummary — 2 clickable metric cards driving
+                    # IncomeSourcesPieChart, same pattern as SpendingSummary;
+                    # IncomeSourceRow — log-row list item mirroring
                     # BudgetEnvelopeRow; IncomeSourcePaychecks — expand-on-click
                     # paycheck log/add form mirroring CategoryPurchases;
                     # AddIncomeSourceDialog — mirrors AddBudgetDialog)
-    dashboard/     # Dashboard home components (DashboardPanel, MoneyOverviewCard)
+    dashboard/     # Dashboard home components (MoneySummaryRow — the top
+                    # always-current-month income/spent/leftover row;
+                    # DashboardPanel — no longer rendered directly by HomePage
+                    # since the panel-grid layout was replaced by MoneySummaryRow
+                    # + tabs, but kept as a reusable tone/icon/value card primitive
+                    # rather than deleted; MoneySummaryRow reuses its exported
+                    # `toneClasses` lookup for icon tinting)
     charts/        # Recharts wrapper components (still empty/future — not the
-                    # same as MoneyOverviewCard's donut, which is a hand-rolled CSS
-                    # conic-gradient, not Recharts; also not the same as
-                    # SpendingPieChart, which is real Recharts but feature-specific
-                    # so it lives in components/spending/ instead, same reasoning
-                    # as CategoryBreakdownBar living in components/budget/)
-  pages/           # route-level components (HomePage = dashboard, BudgetPage,
-                    # SpendingPage, IncomePage, AboutPage)
+                    # same as SpendingPieChart, which is real Recharts but
+                    # feature-specific so it lives in components/spending/ instead,
+                    # same reasoning as CategoryBreakdownBar living in
+                    # components/budget/)
+  pages/           # route-level components — each is now a thin wrapper (heading
+                    # + "Back to dashboard" button) around its feature's *Content
+                    # component (HomePage = dashboard, BudgetPage, SpendingPage,
+                    # IncomePage, AboutPage)
   stores/          # Zustand stores, one file per domain, named use<Domain>Store.ts
                     # (useBudgetStore.ts is the first one — categories,
                     # incomeSources, paychecks, purchases, bankBalance,
@@ -279,7 +312,11 @@ src/
                     # getAveragePaycheckAmount, getMonthlyTarget — resolves a
                     # BudgetCategory's dollar target from income context;
                     # getSourcePaychecks/getSourceMonthlyIncome — a single
-                    # IncomeSource's paychecks/total for a given month)
+                    # IncomeSource's paychecks/total for a given month;
+                    # getLeftoverCash — monthlyIncome minus getTotalSpent, the
+                    # dashboard's "money left over" figure, deliberately named and
+                    # kept distinct from the unrelated "remaining budget"
+                    # (budgeted-minus-spent) concept used on the Budget tab)
     purchases.ts   # derived spending helpers (getCategoryPurchases, getCategorySpent) —
                     # a category's spend is summed from Purchase records filtered to
                     # its current period, never stored directly
@@ -1023,3 +1060,112 @@ unique findings, not the standard checklist.
   (added then removed a test $300 W-2 paycheck to leave seed data intact).
   Dark mode read correctly on both the dashboard panel and the Income page.
   `tsc -b`, `oxlint`, and `vite build` all clean.
+
+### 2026-07-06 — Dashboard revamp: top summary row + inline tabs
+- User wanted more key information centralized on the dashboard — what
+  they're spending their monthly income on, how much is left over, and
+  where spending is going — without clicking into separate pages.
+  Clarified up front via three questions: "leftover" means income minus
+  spending (not the donut's existing, different "remaining budget" =
+  budgeted-minus-spent); the real per-category spending breakdown should
+  replace the donut rather than sit alongside it; and — the user's own
+  design, given verbatim rather than picked from the offered options —
+  "add one big horizontal row at the top of the screen... instead of
+  clicking on the panels to get to different views/screens let's have
+  the views below the horizontal row... tabs at the bottom of it to
+  switch between the different views/screens."
+- Added `getLeftoverCash` to `src/lib/income.ts` (`monthlyIncome -
+  getTotalSpent(...)`), deliberately named to stay lexically distinct
+  from the donut's old "remaining budget" concept even though both are
+  "money not yet spent" in a loose sense — they answer different
+  questions (cash in pocket vs. budget room left) and conflating the
+  names would have made future bugs likely.
+- Extracted `BudgetContent`/`SpendingContent`/`IncomeContent`
+  (`components/budget/`, `components/spending/`, `components/income/`)
+  out of `BudgetPage`/`SpendingPage`/`IncomePage` — each owns its own
+  `referenceDate` state and everything from `MonthYearPicker` down,
+  verbatim-moved from the old page files. This is what let the same
+  component mount twice independently (once as the standalone route,
+  once inside a dashboard tab) with fully separate month-navigation
+  state and zero prop-drilling from `HomePage` — confirmed during
+  verification that navigating the Budget tab to June 2026 left the
+  Spending tab and the top summary row both still on July 2026. The
+  three page files shrank to ~15-line wrappers (heading + back button +
+  the content component); `/budget`/`/spending`/`/income` still work
+  identically as standalone routes, `src/App.tsx` needed zero changes.
+- Built `MoneySummaryRow` (`components/dashboard/`) — one wide `Card`
+  with 3 segments (Income/Spent/Leftover), always computed for the
+  *current* month regardless of what historical month any tab below is
+  browsing to, preserving the pre-existing "dashboard live content
+  always shows now" principle. Reuses `DashboardPanel`'s tone/icon
+  visual language by exporting its previously-private `toneClasses`
+  lookup rather than duplicating it.
+- Added shadcn `tabs` (`npx shadcn@latest add tabs -y`) and proactively
+  fixed the generated `Tabs`/`TabsList`/`TabsTrigger`/`TabsContent`
+  missing `React.forwardRef`, per this file's established
+  checked-and-fixed-on-add convention.
+- Deleted `MoneyOverviewCard.tsx` outright (fully replaced by
+  `MoneySummaryRow`) but deliberately kept `DashboardPanel.tsx`, even
+  though nothing renders it directly anymore — its tone/icon/value
+  visual language is exactly what `MoneySummaryRow` reuses, and deleting
+  a small, working, well-factored component for no benefit seemed worse
+  than a one-line note that it's currently unused-as-a-panel.
+- Bundled in a small consolidation while touching this code: three
+  different files (`HomePage`, the now-deleted `MoneyOverviewCard`, and
+  `BudgetSummary`) each independently re-implemented the same
+  `categories.reduce(getCategorySpent...)` that `getTotalSpent`
+  (`src/lib/spending.ts`) already existed to provide. The first two
+  disappeared with this rewrite; fixed `BudgetSummary.tsx`'s copy too
+  (a strict no-op swap to `getTotalSpent(...)`) so no duplicate was left
+  behind for no reason.
+- Chose to drop Tax from the dashboard entirely rather than carry it
+  forward as a disabled tab — it was always 100% mock content (even one
+  of the old donut's 4 slices was a hardcoded `$1,100` placeholder), and
+  a tab promising a feature that doesn't exist yet isn't better than no
+  tab. `CLAUDE.md`'s "Not yet implemented" list already tracks it.
+  Spending was made the default active tab since "where is my money
+  going" was the revamp's central ask.
+- **Long, ultimately-unnecessary detour verifying dark mode**: computed
+  styles on the active `TabsTrigger` kept reading as an opaque white
+  background no matter what was changed — swapping the shadcn-shipped
+  `data-active:` custom variant for the native `data-[state=active]:`
+  arbitrary variant, even overriding `--background` or setting an inline
+  `background-color !important` directly via `preview_eval` had zero
+  effect on the next read. This looked exactly like a broken cascade and
+  briefly got "fixed" with a redundant React-state-driven className
+  workaround. The real cause: `TabsTrigger` ships `transition-all`
+  (animates `background-color`), and every one of those reads was taken
+  moments after a class/state change, catching mid-transition alpha
+  values (`oklab(1 0 0 / 0.045)` instead of the settled value) — not a
+  cascade bug at all. Restarting the preview server and re-reading after
+  a real wait (~500ms) showed the correct, already-working values in
+  both themes (light: opaque white bg + dark text; dark: a 4.5% white
+  overlay on `--input`, i.e. `bg-input/30` × `--input`'s own 15% alpha —
+  exactly the shadcn-intended "subtly elevated" active-tab look). Reverted
+  the redundant workaround in `HomePage.tsx`; kept the harmless
+  `data-[state=active]:` rename in `tabs.tsx` since it's simpler/more
+  portable than depending on shadcn's bundled custom-variant CSS, even
+  though it turned out not to be the fix. **Lesson for this file**: when
+  a computed style looks "stuck" right after triggering a class or state
+  change on an element with `transition-*` classes, wait for the
+  transition to settle (or check `transitionend`) before concluding the
+  cascade itself is broken — an inline `!important` override that
+  appears to have "no effect" is a strong tell that you're reading a
+  mid-transition value, not that the override failed.
+- Verified end-to-end (see `clearbooks-verify` skill): top row's Income
+  ($6,980) − Spent ($3,447.00) = Leftover ($3,533.00) confirmed exactly;
+  Spending is the default active tab and renders its full breakdown
+  chart; clicking Budget/Income tabs switches `TabsContent` to each's
+  complete content (confirmed `BudgetSummary`'s post-refactor "Monthly
+  Spent / Total Budgeted" figure — $3,447.00 / $4,386 — matches what the
+  old inline reduce produced); navigated the Budget tab to June 2026 and
+  confirmed the Spending tab and the top row both stayed on July 2026
+  (independent state, not shared); visited `/budget` directly and
+  confirmed it renders identically to before the extraction. Dark mode
+  confirmed correct after accounting for the transition-timing red
+  herring above. `tsc -b`, `npm run lint`, `npm run build` all clean.
+- `preview_screenshot` timed out repeatedly this session (30s timeout,
+  page was actually fine per `document.readyState`/`preview_snapshot`) —
+  worked around by relying on `preview_snapshot`/`preview_eval` for the
+  entire verification pass instead. Not investigated further; flagged
+  here in case it recurs.
