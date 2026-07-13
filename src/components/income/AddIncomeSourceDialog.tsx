@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { useForm } from 'react-hook-form'
+import { useForm, Controller } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { Plus } from 'lucide-react'
 import { Button } from '@/components/ui/button'
@@ -14,6 +14,13 @@ import {
 } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
 import { useBudgetStore } from '@/stores/useBudgetStore'
 import {
   addIncomeSourceSchema,
@@ -40,6 +47,7 @@ export function AddIncomeSourceDialog() {
   const {
     register,
     handleSubmit,
+    control,
     reset,
     formState: { errors },
   } = useForm<AddIncomeSourceInput>({
@@ -49,7 +57,13 @@ export function AddIncomeSourceDialog() {
 
   function onSubmit(data: AddIncomeSourceInput) {
     const color = chartColors[incomeSources.length % chartColors.length]
-    addIncomeSource({ name: data.name, iconName: 'Banknote', color, isCustom: true })
+    addIncomeSource({
+      name: data.name,
+      iconName: 'Banknote',
+      color,
+      isCustom: true,
+      incomeType: data.incomeType,
+    })
     reset({ name: '' })
     setOpen(false)
   }
@@ -77,6 +91,33 @@ export function AddIncomeSourceDialog() {
             <Input id="name" placeholder="e.g. Lyft" {...register('name')} />
             {errors.name && (
               <p className="text-xs text-destructive">{errors.name.message}</p>
+            )}
+          </div>
+
+          <div className="space-y-1.5">
+            <Label htmlFor="incomeType">Taxed as</Label>
+            <Controller
+              name="incomeType"
+              control={control}
+              render={({ field }) => (
+                <Select value={field.value ?? ''} onValueChange={field.onChange}>
+                  <SelectTrigger id="incomeType" className="w-full">
+                    <SelectValue placeholder="Choose how this is taxed" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="w2">W-2 wages</SelectItem>
+                    <SelectItem value="contracted">Contracted (1099)</SelectItem>
+                    <SelectItem value="selfEmployed">
+                      Self-employed / freelance
+                    </SelectItem>
+                  </SelectContent>
+                </Select>
+              )}
+            />
+            {errors.incomeType && (
+              <p className="text-xs text-destructive">
+                {errors.incomeType.message}
+              </p>
             )}
           </div>
 

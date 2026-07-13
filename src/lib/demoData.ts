@@ -32,11 +32,11 @@ export const demoCategories: Array<FirestoreCategoryDoc & { id: string }> = [
 export const demoIncomeSources: Array<
   FirestoreIncomeSourceDoc & { id: string }
 > = [
-  { id: 'w2-job', name: 'W-2 Job', iconName: 'Briefcase', color: 'chart-1' },
-  { id: 'freelance', name: 'Freelance', iconName: 'FileText', color: 'chart-2' },
-  { id: 'uber', name: 'Uber', iconName: 'Car', color: 'chart-3' },
-  { id: 'doordash', name: 'DoorDash', iconName: 'Bike', color: 'chart-4' },
-  { id: 'airbnb', name: 'Airbnb', iconName: 'Building2', color: 'chart-5' },
+  { id: 'w2-job', name: 'W-2 Job', iconName: 'Briefcase', color: 'chart-1', incomeType: 'w2' },
+  { id: 'freelance', name: 'Freelance', iconName: 'FileText', color: 'chart-2', incomeType: 'contracted' },
+  { id: 'uber', name: 'Uber', iconName: 'Car', color: 'chart-3', incomeType: 'selfEmployed' },
+  { id: 'doordash', name: 'DoorDash', iconName: 'Bike', color: 'chart-4', incomeType: 'selfEmployed' },
+  { id: 'airbnb', name: 'Airbnb', iconName: 'Building2', color: 'chart-5', incomeType: 'selfEmployed' },
 ]
 
 export const demoPaychecks: FirestorePaycheckDoc[] = [

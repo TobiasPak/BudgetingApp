@@ -46,6 +46,12 @@ function incomeSourceDocToSource(id: string, data: FirestoreIncomeSourceDoc): In
     icon: getIcon(data.iconName),
     color: data.color,
     isCustom: data.isCustom,
+    // Docs written before incomeType existed have no value here. Default to
+    // 'selfEmployed' rather than 'w2' — treating unclassified income as
+    // self-employment risks overstating tax owed, treating it as W-2 risks
+    // silently understating it (missing SE tax entirely). The former is the
+    // safer failure mode for a tax estimate.
+    incomeType: data.incomeType ?? 'selfEmployed',
   }
 }
 

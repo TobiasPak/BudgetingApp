@@ -37,7 +37,7 @@ Planned feature areas (not yet built — see Current Status):
 | Receipt OCR | Veryfi (not yet integrated) |
 | Mileage | Manual entry + MileIQ import (not yet built) |
 | Email | Resend or SendGrid (not yet integrated) |
-| Tax engine | Custom Node.js module, IRS + CA FTB (not yet built) |
+| Tax engine | Custom TypeScript module (`src/lib/tax/`), IRS + CA FTB — federal + California only so far, single filer |
 | Package manager | npm |
 
 Note: `npm create vite@latest` currently defaults to React 19 + rolldown-vite.
@@ -47,11 +47,11 @@ what the installed create-vite version ships.
 
 ## Current Status
 
-**Budget envelopes + revamped tabbed dashboard home + income tracking + month/year ledger navigation + spending screen + income screen + real Firebase Auth/Firestore persistence. Plaid still not started.**
+**Budget envelopes + revamped tabbed dashboard home + income tracking + month/year ledger navigation + spending screen + income screen + real Firebase Auth/Firestore persistence + federal/California tax estimate. Plaid still not started.**
 
 Implemented:
 - Project scaffold (Vite + React 18 + TypeScript), clean `npm install`
-- Routing: `/` (dashboard home), `/budget` (Budget envelopes + income), `/spending` (Spending screen), `/income` (Income screen), `/about` (placeholder)
+- Routing: `/` (dashboard home), `/budget` (Budget envelopes + income), `/spending` (Spending screen), `/income` (Income screen), `/tax` (Tax estimate), `/about` (placeholder)
 - Tailwind v4 + shadcn/ui wired up (`components.json`, `src/lib/utils.ts`,
   components: `button`, `card`, `progress`, `dialog`, `input`, `label`,
   `select`, `popover`, `tabs`, `sonner`, `alert-dialog`)
@@ -298,14 +298,39 @@ Implemented:
   `firebase-admin` + `firebase-functions` installed, compiles clean, no real
   functions yet — Plaid token exchange will live here in a future session)
 - Git hygiene: `.gitignore` added, `node_modules` untracked from git
+- **Tax estimate (`/tax`, + a dashboard tab)**: federal + California
+  liability estimate, single filer, resident-alien federal treatment —
+  see `src/lib/tax/` (pure, derived-not-stored calculation functions,
+  same convention as every other `src/lib/*.ts` helper) for the actual
+  brackets/formulas and their sources, or `TAX_CALCULATION.md` (repo root)
+  for a plain-English writeup of the whole calculation — keep that file in
+  sync whenever `src/lib/tax/` changes. `IncomeSource` gained a required
+  `incomeType: 'w2' | 'contracted' | 'selfEmployed'` field
+  (`src/types/incomeSource.ts`) — every income source now has to be
+  actively tagged (via a required `Select` in `AddIncomeSourceDialog`, no
+  default pre-selected) since self-employment income owes SE tax and W-2
+  doesn't. `'contracted'` (1099 contractor) and `'selfEmployed'`
+  (freelance/gig/other 1099) are taxed identically under federal/CA law —
+  they exist as separate values purely for clearer per-source labeling,
+  not a taxable distinction. `getAnnualizedIncomeByType` (`src/lib/income.ts`)
+  is the one integration point between the existing income model and the
+  tax module: it turns raw paychecks into `{ w2, selfEmployed }` annualized
+  totals — combining `'contracted'` and `'selfEmployed'` sources into that
+  one `selfEmployed` bucket — and nothing downstream in `src/lib/tax/` ever
+  touches raw paychecks directly. No month/year
+  navigation on this page (unlike Budget/Spending/Income) — tax is
+  inherently an annual calculation off annualized current income, and
+  there's no "which year" picker anywhere in the app to hook into yet.
+  `TaxContent` carries an explicit on-page disclaimer (estimate only, not
+  tax advice, doesn't model W-2 withholding) since this is real financial
+  guidance, not a cosmetic feature
 
-Not yet implemented: Tax feature (no dashboard surface at all now —
-dropped from the tab bar rather than kept as mock content), a running
-tax-reserve balance, Plaid/Veryfi/Resend integrations (Plaid is the
-planned next backend session — needs a developer sandbox account with
-API keys, then real Cloud Functions for token exchange), tax engine,
-dark-mode toggle (theme is class-based and CSS-ready, but nothing flips
-the `.dark` class yet).
+Not yet implemented: a running tax-reserve balance, itemized deductions/
+credits, filing statuses other than single, Plaid/Veryfi/Resend
+integrations (Plaid is the planned next backend session — needs a
+developer sandbox account with API keys, then real Cloud Functions for
+token exchange), dark-mode toggle (theme is class-based and CSS-ready,
+but nothing flips the `.dark` class yet).
 
 ## Architecture / Folder Conventions
 
@@ -342,6 +367,12 @@ src/
                     # BudgetEnvelopeRow; IncomeSourcePaychecks — expand-on-click
                     # paycheck log/add form mirroring CategoryPurchases;
                     # AddIncomeSourceDialog — mirrors AddBudgetDialog)
+    tax/           # Tax feature components (TaxContent — the extracted page-body
+                    # used by both TaxPage and the dashboard's Tax tab; no separate
+                    # summary/row subcomponents like the other features since this
+                    # page has no chart-driven card-selection interaction, just a
+                    # disclaimer banner + summary cards + federal/CA breakdown
+                    # cards + a quarterly-payments list, all in one file)
     dashboard/     # Dashboard home components (MoneySummaryRow — the top
                     # always-current-month income/spent/leftover row, owns
                     # `toneClasses`/`PanelTone` for icon tinting;
@@ -355,9 +386,9 @@ src/
   pages/           # route-level components — each is now a thin wrapper (heading
                     # + "Back to dashboard" button) around its feature's *Content
                     # component (HomePage = dashboard, BudgetPage, SpendingPage,
-                    # IncomePage, AboutPage). SignInPage — unprotected, full-page
-                    # (not a dialog — unauthenticated users need a real landing
-                    # destination), sign-in/sign-up mode toggle
+                    # IncomePage, TaxPage, AboutPage). SignInPage — unprotected,
+                    # full-page (not a dialog — unauthenticated users need a real
+                    # landing destination), sign-in/sign-up mode toggle
   stores/          # Zustand stores, one file per domain, named use<Domain>Store.ts
                     # (useBudgetStore.ts — categories, incomeSources, paychecks,
                     # purchases, bankBalance, paychecksPerMonth, now Firestore-
@@ -395,6 +426,20 @@ src/
                     # bankBalance/paychecksPerMonth
       demoData.ts   # loadDemoData(uid) — one writeBatch (~40 writes) seeding
                     # demoData.ts's dataset into a user's own Firestore docs
+    tax/
+      brackets.ts  # Pure data: FEDERAL_BRACKETS_2026, CA_BRACKETS_2025, standard
+                    # deductions, SE tax/QBI/SDI constants, each labeled with its
+                    # source and tax year; applyBrackets() — shared progressive
+                    # marginal-bracket calculator used by both federal.ts and
+                    # california.ts
+      federal.ts   # calculateFederalTax({w2Income, selfEmploymentIncome}) — SE
+                    # tax, QBI deduction, standard deduction, bracket application;
+                    # returns every intermediate line item, not just the total
+      california.ts # calculateCaliforniaTax(...) — SDI (W-2 only), no QBI
+                    # conformity, no separate SE tax (flows into ordinary CA
+                    # taxable income)
+      quarterly.ts # getQuarterlyEstimates(...) — federal 25/25/25/25 vs CA's
+                    # 30/40/0/30 installment split; formatDueDate()
     utils.ts       # shadcn cn() helper, formatCurrency() (always 2 decimals —
                     # needed anywhere a value sums user-entered purchase amounts)
     budget.ts      # derived budget helpers (isOverBudget, progressPercent) — take
@@ -407,7 +452,10 @@ src/
                     # getLeftoverCash — monthlyIncome minus getTotalSpent, the
                     # dashboard's "money left over" figure, deliberately named and
                     # kept distinct from the unrelated "remaining budget"
-                    # (budgeted-minus-spent) concept used on the Budget tab)
+                    # (budgeted-minus-spent) concept used on the Budget tab;
+                    # getAnnualizedIncomeByType — this month's income annualized
+                    # and split by each source's incomeType into {w2,
+                    # selfEmployed}, the one integration point src/lib/tax/ uses)
     purchases.ts   # derived spending helpers (getCategoryPurchases, getCategorySpent) —
                     # a category's spend is summed from Purchase records filtered to
                     # its current period, never stored directly
@@ -422,7 +470,10 @@ src/
                     # both AddPaycheckDialog and CategoryPurchases
     schemas/
       budget.ts    # Zod schemas: addBudgetSchema, addPaycheckSchema, addPurchaseSchema
-      income.ts    # addIncomeSourceSchema; addPaycheckWithSourceSchema — extends
+      income.ts    # addIncomeSourceSchema — includes required incomeType ('w2' |
+                    # 'contracted' | 'selfEmployed'), no default, since which one an
+                    # income source is drives real tax math (src/lib/tax/), not just
+                    # display; addPaycheckWithSourceSchema — extends
                     # budget.ts's base addPaycheckSchema with a required sourceId,
                     # used only by the standalone AddPaycheckDialog (not
                     # IncomeSourcePaychecks's row-scoped form, which already knows
@@ -433,8 +484,12 @@ src/
   types/
     budget.ts      # BudgetCategory (fixed | percentage discriminated union,
                     # each with resetDay), ChartColorToken, DistributiveOmit utility
-    incomeSource.ts # IncomeSource (id, name, icon, color, isCustom?) — a Paycheck's
-                    # categorization label, no resetDay/target unlike BudgetCategory
+    incomeSource.ts # IncomeSource (id, name, icon, color, isCustom?, incomeType) —
+                    # a Paycheck's categorization label, no resetDay/target unlike
+                    # BudgetCategory; incomeType ('w2' | 'contracted' | 'selfEmployed')
+                    # is required and drives src/lib/tax/'s SE-tax/QBI calculation, not
+                    # just display — 'contracted'/'selfEmployed' are taxed identically,
+                    # separate values exist only for clearer per-source labeling
     paycheck.ts    # Paycheck (id, amount, date as ISO "YYYY-MM-DD" string, sourceId
                     # referencing an IncomeSource)
     purchase.ts    # Purchase (id, categoryId, date, description, amount)
@@ -1484,3 +1539,169 @@ unique findings, not the standard checklist.
   (icon tint colors, leftover-tone success/destructive switch) after the
   `toneClasses`/`PanelTone` move; `git status` confirmed only the
   intended files changed.
+
+### 2026-07-12 — Federal + California tax estimate (`/tax`)
+- User asked to build the Tax feature for real, scoped to California,
+  before starting Plaid. This is the user's own personal account, not a
+  demo — so the actual scope decisions mattered. Used `AskUserQuestion`
+  up front to lock in: each income source gets a required tax
+  classification (W-2 vs. self-employed, since only the latter owes SE
+  tax); single filer, hardcoded; show both an annual total and a
+  quarterly breakdown; include the federal QBI deduction.
+- **The filing-status question surfaced a real complication mid-session**:
+  the user is a recent international-student grad on OPT, which usually
+  means *nonresident alien* federal tax status (Form 1040-NR — no
+  standard deduction, no self-employment tax, different rules almost
+  entirely) rather than the "normal" filer this feature was about to
+  assume. Rather than silently building the wrong thing, asked a second
+  clarifying round specifically about F-1/OPT tax-residency status and
+  treaty-country exceptions (India's is the common one) before writing
+  any tax math. User's own call: treat as a **resident alien** for now —
+  standard single-filer rules apply, no NRA-specific handling built. This
+  wasn't guessed; it was asked and answered explicitly, and it's worth
+  remembering that a filing-status question here isn't cosmetic the way
+  most of this app's dialog defaults are — getting it wrong would mean
+  real numbers pointed the wrong way.
+- **Researched current tax figures via `WebSearch`/`WebFetch` rather than
+  relying on memorized bracket numbers**, given the real financial stakes
+  — federal 2026 single-filer brackets and standard deduction, 2026 SE
+  tax/Social Security wage base/Additional Medicare threshold, federal
+  QBI deduction rules, California 2025 brackets/standard deduction (2026
+  CA figures found this session were inconsistent across sources — some
+  blogs mislabel 2025 numbers as 2026 — so 2025 was used as the reliably-
+  sourced baseline instead, clearly labeled as such in code and UI rather
+  than papered over), CA SDI rate (1.2%, no wage cap since SB 951), and
+  quarterly estimated-payment mechanics. **Found a genuine, easy-to-miss
+  CA-specific quirk**: California's quarterly installment split is 30% /
+  40% / 0% / 30% — not even 25% quarters like federal. Missing this would
+  have been a real, checkable inaccuracy in a feature explicitly meant to
+  tell the user what to pay and when, so it's surfaced explicitly in the
+  UI (`TaxContent`'s quarterly section caption) rather than left to look
+  like a bug. Every bracket/rate constant in `src/lib/tax/brackets.ts` is
+  commented with its source and tax year.
+- Added `incomeType: 'w2' | 'selfEmployed'` to `IncomeSource`
+  (`src/types/incomeSource.ts`) — required, no default, since which one a
+  source is now drives real tax math rather than being cosmetic. Threaded
+  through `FirestoreIncomeSourceDoc`, `firestore.rules` (validated on
+  write, matching the existing field-type-validation convention), a
+  required `Select` in `AddIncomeSourceDialog` (mirrors `AddBudgetDialog`'s
+  `Controller`-wrapped `Select` pattern), and `demoData.ts` (W-2 Job → w2,
+  the 4 gig/freelance sources → selfEmployed). For any pre-existing doc
+  written before this field existed, `firestore/sync.ts` defaults to
+  `'selfEmployed'` on read — deliberately the *conservative* fallback
+  (risk of overstating tax owed) rather than `'w2'` (risk of silently
+  dropping SE tax from the estimate entirely).
+- Added `getAnnualizedIncomeByType` to `src/lib/income.ts` — the single
+  integration point between the existing income model and the new tax
+  module. It's this month's income (same window `getMonthlyIncome`
+  already uses), split by each paycheck's source's `incomeType` and
+  projected ×12 the same way `getYearlyProjectedIncome` already does.
+  Everything in `src/lib/tax/` only ever sees `{ w2, selfEmployed }`
+  totals, never raw paychecks.
+- Built `src/lib/tax/` as 4 pure, derived-not-stored files (same
+  convention as every other `src/lib/*.ts` helper — nothing new is
+  written to the store or Firestore): `brackets.ts` (bracket tables +
+  constants + a shared `applyBrackets` progressive-marginal calculator),
+  `federal.ts` (`calculateFederalTax` — SE tax on 92.35% of net SE
+  earnings, half-SE-tax above-the-line deduction, Additional Medicare tax,
+  QBI deduction capped at 20% of taxable income before QBI, standard
+  deduction, bracket application — returns every intermediate line item,
+  not just the total, since the UI renders a full breakdown), `california.ts`
+  (`calculateCaliforniaTax` — conforms to the federal half-SE-tax
+  deduction for CA AGI purposes but **not** to QBI, since California
+  doesn't allow it; SDI applies to W-2 wages only; no separate CA
+  self-employment tax, SE net income just flows into ordinary CA taxable
+  income), `quarterly.ts` (`getQuarterlyEstimates` — the 25/25/25/25 vs.
+  30/40/0/30 split above, plus `formatDueDate` using the app's established
+  parse-the-ISO-string's-own-components convention rather than
+  `new Date(isoString)`).
+- **This app doesn't track Schedule C business expenses yet** (tracked
+  separately under Not yet implemented), so self-employment "net profit"
+  is modeled as the full gross self-employment income logged — a known,
+  documented simplification, not an oversight. Similarly, no wage/UBIA
+  QBI phase-out is modeled (the target user's income is well under the
+  ~$197k–201k single-filer threshold where that would start to matter).
+- **Hand-verified the math with a throwaway `tsx` script before wiring
+  into the UI** — this repo's own established practice for numeric/date
+  logic (see the `getCurrentPeriod` verification in the 2026-07-03
+  Session Log entry), even more warranted here given real financial
+  stakes. Checked 5 scenarios (all-W-2 $80k, all-self-employment $60k, a
+  mixed case, zero income, and a high-income case specifically to trigger
+  the Additional Medicare tax) against hand-computed expected values,
+  confirmed the quarterly amounts sum exactly back to the annual totals
+  for both jurisdictions, and confirmed CA's Q3 installment is genuinely
+  $0 by design rather than a bug. All checks passed before any UI code
+  was written; the script was deleted afterward (never committed).
+- Built `TaxContent.tsx` (`components/tax/`) — unlike Budget/Spending/
+  Income, this page has **no month/year navigation**: tax is inherently
+  an annual calculation off annualized current income, and there's no
+  "which year" picker anywhere in this app to hook into yet, so it always
+  reflects "now," same as `MoneySummaryRow`. Also unlike those other
+  three features, there's no chart-driven card-selection interaction here
+  (nothing to select a metric that redraws a chart), so this stayed one
+  file rather than splitting into summary/row subcomponents. Carries an
+  explicit on-page disclaimer (estimate only, not tax advice, assumes
+  single/resident-alien/standard-deduction, doesn't model W-2 withholding,
+  consult a professional) since this is real financial guidance rendered
+  directly to the user, not decorative copy. `TaxPage.tsx` is the usual
+  thin wrapper; `/tax` added to `App.tsx`'s protected routes and a `Tax`
+  tab added to `HomePage.tsx`, mechanically identical to how
+  Spending/Budget/Income were already wired.
+- Verified (see `clearbooks-verify` skill): `tsc -b`/`lint`/`build` all
+  clean. Confirmed via the dev server that `/tax` and the dashboard's Tax
+  tab show identical numbers (same `TaxContent` mount, same store); added
+  income sources of each `incomeType` and confirmed the required `Select`
+  correctly blocks submission with neither chosen; confirmed the federal
+  and California breakdown cards' line items sum to their displayed
+  totals; confirmed the quarterly section's federal amounts sum to the
+  federal total and CA amounts (30/40/0/30) sum to the CA total; dark
+  mode checked since this is new UI. `firestore.rules`' new
+  `incomeType` validation was updated locally but **not deployed** to the
+  real project this session — deploying rules is a separate, explicit,
+  user-confirmed action per this file's established convention (see the
+  2026-07-12 Firebase entry), and wasn't asked for here.
+
+### 2026-07-12 — Added a "Contracted (1099)" income classification
+- Follow-up to the tax estimate above: the user's own current job is a
+  genuine 1099 contracting position (confirmed via their actual contract
+  language — a 1099-MISC, "Consultant shall be solely responsible for all
+  federal, state, and local taxes"), and the 2-value `w2`/`selfEmployed`
+  split didn't have a clean home for it. **Flagged up front, before
+  building anything**: a 1099 contractor is legally self-employment income
+  under federal/CA law — same SE tax, same Schedule C, same QBI
+  eligibility as freelance/gig income. There's no separate tax treatment
+  to build here, only a labeling question. Confirmed via `AskUserQuestion`
+  that this is genuinely 1099/no-withholding (not a W-2-through-an-agency
+  arrangement, which would've meant tagging it `w2` instead, not adding a
+  category at all) before touching any code.
+- `IncomeType` (`src/types/incomeSource.ts`) is now
+  `'w2' | 'contracted' | 'selfEmployed'`. `'contracted'` and
+  `'selfEmployed'` are both routed into the same `selfEmployed` bucket by
+  `getAnnualizedIncomeByType` (`src/lib/income.ts`) — confirmed this
+  required **zero logic changes** there, since the existing `else` branch
+  (anything not `'w2'`) already captured any future third value
+  automatically; only the doc comment needed updating to make the
+  bucketing intentional rather than incidental. `src/lib/tax/` itself
+  (`federal.ts`/`california.ts`) needed no changes at all — it never knew
+  about 3 income types, only ever `{ w2Income, selfEmploymentIncome }`.
+  This is the same "the type distinction that matters for tax purposes
+  isn't the type distinction that matters for organization" split as
+  `BudgetCategory`'s `resetDay` vs `type` fields being independent axes.
+- Added a third `SelectItem` to `AddIncomeSourceDialog`'s required
+  `incomeType` `Select` ("Contracted (1099)", between "W-2 wages" and
+  "Self-employed / freelance" — relabeled from the prior session's
+  "Self-employed / 1099" since "1099" is now shared vocabulary across two
+  options and needed to stop being the distinguishing word in that
+  particular label). `addIncomeSourceSchema` (`src/lib/schemas/income.ts`)
+  and `firestore.rules`' `incomeType in [...]` validation both extended to
+  the 3-value list. Retagged `demoData.ts`'s "Freelance" mock source from
+  `selfEmployed` to `contracted` — a closer real-world fit for an ongoing
+  single-engagement freelance arrangement than the gig-platform sources
+  (Uber/DoorDash/Airbnb), which stayed `selfEmployed`.
+- Verified (see `clearbooks-verify` skill): `tsc -b`/`lint`/`build` clean.
+  Added a `contracted`-tagged income source via the dev server, confirmed
+  the dropdown shows all 3 options with the new labels, added a paycheck
+  to it, and confirmed the Tax tab's Federal Tax Owed increased correctly
+  (folded into the self-employment total, not silently dropped or
+  double-counted) — then removed the test paycheck and confirmed the
+  total reverted exactly to the pre-test baseline.

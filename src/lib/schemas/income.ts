@@ -3,6 +3,13 @@ import { addPaycheckSchema } from './budget'
 
 export const addIncomeSourceSchema = z.object({
   name: z.string().min(1, 'Name is required'),
+  // Required, no default — see src/lib/tax/ for why this drives real tax
+  // math (SE tax only applies to self-employment income) rather than being
+  // cosmetic, so the user must make an active choice rather than silently
+  // inheriting a guessed default.
+  incomeType: z.enum(['w2', 'contracted', 'selfEmployed'], {
+    message: 'Choose how this income is taxed',
+  }),
 })
 
 export type AddIncomeSourceInput = z.infer<typeof addIncomeSourceSchema>

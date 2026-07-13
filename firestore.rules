@@ -28,7 +28,8 @@ service cloud.firestore {
         allow create, update: if isOwner(userId)
           && request.resource.data.name is string
           && request.resource.data.iconName is string
-          && request.resource.data.color is string;
+          && request.resource.data.color is string
+          && request.resource.data.incomeType in ['w2', 'contracted', 'selfEmployed'];
       }
 
       match /paychecks/{paycheckId} {

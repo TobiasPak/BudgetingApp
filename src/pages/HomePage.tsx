@@ -6,8 +6,9 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { SpendingContent } from '@/components/spending/SpendingContent'
 import { BudgetContent } from '@/components/budget/BudgetContent'
 import { IncomeContent } from '@/components/income/IncomeContent'
+import { TaxContent } from '@/components/tax/TaxContent'
 
-type DashboardTab = 'spending' | 'budget' | 'income'
+type DashboardTab = 'spending' | 'budget' | 'income' | 'tax'
 
 export default function HomePage() {
   const [activeTab, setActiveTab] = useState<DashboardTab>('spending')
@@ -32,6 +33,7 @@ export default function HomePage() {
           <TabsTrigger value="spending">Spending</TabsTrigger>
           <TabsTrigger value="budget">Budget</TabsTrigger>
           <TabsTrigger value="income">Income</TabsTrigger>
+          <TabsTrigger value="tax">Tax</TabsTrigger>
         </TabsList>
 
         <TabsContent value="spending" className="flex flex-col gap-6">
@@ -42,6 +44,9 @@ export default function HomePage() {
         </TabsContent>
         <TabsContent value="income" className="flex flex-col gap-6">
           <IncomeContent />
+        </TabsContent>
+        <TabsContent value="tax" className="flex flex-col gap-6">
+          <TaxContent />
         </TabsContent>
       </Tabs>
     </main>

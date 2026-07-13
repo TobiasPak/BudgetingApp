@@ -1,4 +1,5 @@
 import type { ChartColorToken } from '@/types/budget'
+import type { IncomeType } from '@/types/incomeSource'
 
 // Firestore document shapes — the on-disk/on-wire representation of each
 // entity. Distinct from the in-memory app types (BudgetCategory, Paycheck,
@@ -35,6 +36,7 @@ export interface FirestoreIncomeSourceDoc {
   iconName: string
   color: ChartColorToken
   isCustom?: boolean
+  incomeType: IncomeType
 }
 
 export interface FirestorePaycheckDoc {
