@@ -7,19 +7,16 @@ workers across all income types — W-2 employees, 1099 contractors,
 self-employed/sole proprietors, and gig workers (Uber, DoorDash, Airbnb),
 including hybrid users who combine several of these.
 
-Planned feature areas (not yet built — see Current Status):
+Planned feature areas not yet built (budgeting, income tracking, and the
+federal/CA tax tracker are already built — see Current Status):
 - Bank connectivity via Plaid (12,000+ institutions, OAuth, auto-categorization,
   recurring subscription detection)
-- Personal budgeting envelopes with progress bars and overspend alerts
-- Income tracking across W-2/1099-NEC/1099-K sources, with OCR form upload (Veryfi)
+- OCR form upload for income documents (Veryfi)
 - Business expense tracking: personal/business split, Schedule C categories,
   receipt OCR, partial-deduction flagging (meals 50%, home office %, mixed-use)
 - Mileage tracking: manual entry + MileIQ import, current IRS standard rate
-- **Tax tracker (core differentiator)**: live dual federal (IRS) + California
-  (FTB) tax calculations updated on every income/expense event — brackets,
-  self-employment tax, QBI deduction, standard deduction, CA SDI, quarterly
-  payment tracking for both agencies, tax savings fund, year-end PDF/CSV
-  export mapped to Schedule C / Form 1040 / CA Form 540
+- Tax tracker follow-ons: a running tax savings fund balance, year-end
+  PDF/CSV export mapped to Schedule C / Form 1040 / CA Form 540
 
 ## Tech Stack
 
@@ -47,7 +44,7 @@ what the installed create-vite version ships.
 
 ## Current Status
 
-**Budget envelopes + revamped tabbed dashboard home + income tracking + month/year ledger navigation + spending screen + income screen + real Firebase Auth/Firestore persistence + federal/California tax estimate. Plaid still not started.**
+**Budget envelopes + revamped tabbed dashboard home + income tracking (W-2/contracted/self-employed classification) + a single shared month/year filter driving every tab and standalone route + real Firebase Auth/Firestore persistence (now split into staging + production environments) + federal/California tax estimate + Firestore audit timestamps on every record. Plaid still not started.**
 
 Implemented:
 - Project scaffold (Vite + React 18 + TypeScript), clean `npm install`
@@ -294,6 +291,21 @@ Implemented:
   doesn't touch the real project by default; flip to `false` deliberately
   to test against `budgetapp-67761`). Requires a JDK on `PATH` for the
   Firestore emulator specifically (Auth emulator doesn't need Java)
+- **Three environments, each a gitignored env file + npm script**: `.env.local`
+  (`npm run dev`, emulator-first, unchanged default) → `.env.staging`
+  (`npm run dev:staging`, the original real project `budgetapp-67761`,
+  relabeled "budgetapp-staging" in the Console — project IDs can't
+  actually be renamed, so `.firebaserc`/the project ID itself are
+  unchanged) → `.env.production` (`npm run dev:prod`, a genuinely
+  separate new project, `budgetapp-prod-f0c9a`, with its own Firestore
+  and Auth — not just a second web app registered under the staging
+  project, which was the first, incorrect attempt at this). All three
+  files share the identical `VITE_FIREBASE_*`/`VITE_USE_FIREBASE_EMULATORS`
+  shape, so Vite's built-in `--mode <name>` flag loads the right one with
+  zero code changes to `src/lib/firebase.ts`. `.firebaserc` gained named
+  `staging`/`production` project aliases (`firebase deploy --project
+  production ...`) — `default` deliberately stays pointed at staging so a
+  bare `firebase deploy` can never accidentally hit production
 - Cloud Functions scaffold in `functions/` (own `package.json`/`tsconfig.json`,
   `firebase-admin` + `firebase-functions` installed, compiles clean, no real
   functions yet — Plaid token exchange will live here in a future session)
@@ -309,21 +321,41 @@ Implemented:
   (`src/types/incomeSource.ts`) — every income source now has to be
   actively tagged (via a required `Select` in `AddIncomeSourceDialog`, no
   default pre-selected) since self-employment income owes SE tax and W-2
-  doesn't. `'contracted'` (1099 contractor) and `'selfEmployed'`
-  (freelance/gig/other 1099) are taxed identically under federal/CA law —
-  they exist as separate values purely for clearer per-source labeling,
-  not a taxable distinction. `getAnnualizedIncomeByType` (`src/lib/income.ts`)
-  is the one integration point between the existing income model and the
-  tax module: it turns raw paychecks into `{ w2, selfEmployed }` annualized
-  totals — combining `'contracted'` and `'selfEmployed'` sources into that
-  one `selfEmployed` bucket — and nothing downstream in `src/lib/tax/` ever
-  touches raw paychecks directly. No month/year
-  navigation on this page (unlike Budget/Spending/Income) — tax is
-  inherently an annual calculation off annualized current income, and
-  there's no "which year" picker anywhere in the app to hook into yet.
-  `TaxContent` carries an explicit on-page disclaimer (estimate only, not
-  tax advice, doesn't model W-2 withholding) since this is real financial
-  guidance, not a cosmetic feature
+  doesn't. `'contracted'`/`'selfEmployed'` are taxed identically under
+  federal/CA law and exist purely as clearer per-source labels — see
+  `src/types/incomeSource.ts` for the full reasoning.
+  `getAnnualizedIncomeByType` (`src/lib/income.ts`) is the integration
+  point between the income model and the tax module (combines
+  `'contracted'`/`'selfEmployed'` into one `selfEmployed` bucket; nothing
+  in `src/lib/tax/` ever touches raw paychecks). `TaxContent` now shares
+  the app-wide date filter (see the "single shared date filter" bullet
+  below) rather than always reflecting "now" — browsing to a past month
+  changes which month's income gets annualized and which year's quarterly
+  due dates show, but the actual bracket/rate constants never change,
+  since there's no multi-year bracket lookup; the on-page disclaimer
+  states the bracket years (2026 federal/2025 CA) literally rather than
+  deriving them, to avoid implying otherwise
+- **Single shared date filter** (`src/stores/useDateFilterStore.ts`):
+  reverses the earlier "each tab/route owns its own independent
+  `referenceDate`" design — deliberately, per explicit user request, so
+  browsing to a past month anywhere (any dashboard tab, `MoneySummaryRow`,
+  or any of the 4 standalone routes) is reflected everywhere else too.
+  `MonthYearPicker` itself is unchanged; it's rendered once per page
+  (never inside a `*Content` component anymore) and every render reads/
+  writes the same store. `MoneySummaryRow` no longer always shows "now" —
+  its labels read "in <Month> <Year>" while browsing history, "this
+  month" otherwise (`formatMonthYear` in `src/lib/period.ts`). `TaxContent`
+  gained a date dimension for the first time
+- **Firestore audit timestamps**: every document in the 4 synced
+  collections (categories, incomeSources, paychecks, purchases) now
+  carries `createdAt`/`updatedAt`, set via Firestore's `serverTimestamp()`
+  in `src/lib/firestore/writes.ts` (never client-side `new Date()`, to
+  avoid trusting client clocks) — distinct from any user-entered
+  transaction date. `firestore.rules` validates both are set to
+  `request.time` on create via a shared `hasValidTimestamps()` helper.
+  There's no update path for any of these 4 entities yet (every "add" is
+  always a brand-new document), so `updatedAt` currently always equals
+  `createdAt` — expected, not a bug. No UI surfaces these values yet
 
 Not yet implemented: a running tax-reserve balance, itemized deductions/
 credits, filing statuses other than single, Plaid/Veryfi/Resend
@@ -350,8 +382,13 @@ src/
                     # tab; BudgetEnvelopeRow, BudgetSummary, IncomeOverview,
                     # AddBudgetDialog, AddPaycheckDialog, CategoryPurchases — the
                     # expand-on-click purchase log/add form, MonthYearPicker —
-                    # prev/next + popover month/year selector, CategoryBreakdownBar
-                    # — stacked bar + legend driven by BudgetSummary's 3 clickable
+                    # prev/next + popover month/year selector, reads/writes the
+                    # single shared useDateFilterStore rather than local state —
+                    # rendered once per page (HomePage, and each of the 4
+                    # standalone routes), never inside a *Content component
+                    # itself, so every page/tab shows the same selected date;
+                    # CategoryBreakdownBar — stacked bar + legend driven by
+                    # BudgetSummary's 3 clickable
                     # metric cards)
     spending/      # Spending feature components (SpendingContent — the extracted
                     # page-body used by both SpendingPage and the dashboard's
@@ -394,7 +431,10 @@ src/
                     # purchases, bankBalance, paychecksPerMonth, now Firestore-
                     # synced, see below; useAuthStore.ts — user/status/error +
                     # sign-in/up/out actions, module-level onAuthStateChanged
-                    # listener drives useBudgetStore's sync)
+                    # listener drives useBudgetStore's sync; useDateFilterStore.ts
+                    # — the single shared referenceDate/setReferenceDate every
+                    # page reads/writes, pure in-memory UI state, deliberately
+                    # NOT Firestore-synced and NOT folded into useBudgetStore)
   lib/
     firebase.ts    # Firebase SDK init: `app`, `db` eager; `getFirebaseAuth()` lazy
                     # (getAuth() throws eagerly on missing/invalid API key, unlike
@@ -412,15 +452,23 @@ src/
       types.ts     # Firestore document shapes (FirestoreCategoryDoc — fixed |
                     # percentage discriminated union with iconName, not icon —
                     # FirestoreIncomeSourceDoc, FirestorePaycheckDoc,
-                    # FirestorePurchaseDoc, FirestoreUserDoc)
+                    # FirestorePurchaseDoc, FirestoreUserDoc). The 4 entity docs
+                    # (not FirestoreUserDoc) each carry optional createdAt/
+                    # updatedAt Timestamp fields — optional and absent from
+                    # what callers supply, since writes.ts injects them via
+                    # serverTimestamp() rather than any caller constructing one
       sync.ts       # attachListeners(uid, callbacks) — 5 onSnapshot listeners
                     # (4 subcollections + users/{uid} root doc), converts
-                    # iconName → icon via iconMap on the way in; tracks which
-                    # listeners have reported at least once so onReady fires
-                    # exactly once
+                    # iconName → icon via iconMap on the way in, and each
+                    # entity's createdAt/updatedAt Timestamp → ISO string via
+                    # timestampToIso (docs written before the field existed
+                    # simply come through as undefined); tracks which listeners
+                    # have reported at least once so onReady fires exactly once
       writes.ts     # writeCategory/writeIncomeSource/writePaycheck/writePurchase
                     # + deletePaycheck/deletePurchase/writeUserFields — every
-                    # Firestore write useBudgetStore's actions delegate to
+                    # Firestore write useBudgetStore's actions delegate to.
+                    # Each create function injects createdAt/updatedAt via
+                    # serverTimestamp() itself; no caller ever supplies these
       users.ts      # ensureUserDoc(uid) — idempotent setDoc(...,{merge:true}),
                     # called on every sign-in so it never clobbers existing
                     # bankBalance/paychecksPerMonth
@@ -467,7 +515,9 @@ src/
                     # a current start/end date range; day-clamped for short months.
                     # Also defaultDateForReference — the shared "default form date
                     # for whichever month is currently being viewed" helper used by
-                    # both AddPaycheckDialog and CategoryPurchases
+                    # both AddPaycheckDialog and CategoryPurchases; formatMonthYear
+                    # — "July 2026" formatting shared by MonthYearPicker's trigger
+                    # label and MoneySummaryRow's "in <Month> <Year>" wording
     schemas/
       budget.ts    # Zod schemas: addBudgetSchema, addPaycheckSchema, addPurchaseSchema
       income.ts    # addIncomeSourceSchema — includes required incomeType ('w2' |
@@ -481,7 +531,12 @@ src/
       auth.ts      # signInSchema, signUpSchema (extends signInSchema with
                     # confirmPassword + a .refine() password-match check)
   hooks/           # custom hooks incl. TanStack Query hooks (created on first use)
-  types/
+  types/           # BudgetCategory, IncomeSource, Paycheck, and Purchase (below) all
+                    # carry optional createdAt?/updatedAt? (ISO datetime strings,
+                    # populated by src/lib/firestore/sync.ts) — server-assigned audit
+                    # timestamps, distinct from any user-entered transaction date,
+                    # absent (not fabricated) on documents written before the field
+                    # existed. No UI surfaces these yet
     budget.ts      # BudgetCategory (fixed | percentage discriminated union,
                     # each with resetDay), ChartColorToken, DistributiveOmit utility
     incomeSource.ts # IncomeSource (id, name, icon, color, isCustom?, incomeType) —
@@ -581,6 +636,15 @@ Conventions:
   `tsc` project, generic inference from the first can leak into the second
   and fail project-wide even though a single file checks fine in isolation
   (see `SpendingPieChart.tsx`/`IncomeSourcesPieChart.tsx`)
+- **Hand-verify nontrivial date/numeric logic with a throwaway script
+  before wiring it into the UI**: write a temporary `tsx` script exercising
+  several edge cases against hand-computed expected values, run it with
+  `npx tsx`, then delete it (never commit it) once it passes — cheaper to
+  catch a date-math or bracket-math bug there than by clicking through the
+  UI. Done for `getCurrentPeriod` (day-clamping, year rollover) and for the
+  federal/CA tax calculations (5 income scenarios, including the CA
+  quarterly $0-installment quirk) — referenced as "established practice"
+  in both Session Log entries before this bullet actually existed anywhere.
 - **"View as of a past date" pattern**: functions that compute a derived
   value for "the current period" (`getCategoryPurchases`/`getCategorySpent`,
   `getCurrentPeriod`, `getMonthlyIncome`/`getCurrentMonthPaychecks`) take an
@@ -1622,31 +1686,26 @@ unique findings, not the standard checklist.
   QBI phase-out is modeled (the target user's income is well under the
   ~$197k–201k single-filer threshold where that would start to matter).
 - **Hand-verified the math with a throwaway `tsx` script before wiring
-  into the UI** — this repo's own established practice for numeric/date
-  logic (see the `getCurrentPeriod` verification in the 2026-07-03
-  Session Log entry), even more warranted here given real financial
-  stakes. Checked 5 scenarios (all-W-2 $80k, all-self-employment $60k, a
-  mixed case, zero income, and a high-income case specifically to trigger
-  the Additional Medicare tax) against hand-computed expected values,
-  confirmed the quarterly amounts sum exactly back to the annual totals
-  for both jurisdictions, and confirmed CA's Q3 installment is genuinely
-  $0 by design rather than a bug. All checks passed before any UI code
-  was written; the script was deleted afterward (never committed).
-- Built `TaxContent.tsx` (`components/tax/`) — unlike Budget/Spending/
-  Income, this page has **no month/year navigation**: tax is inherently
-  an annual calculation off annualized current income, and there's no
-  "which year" picker anywhere in this app to hook into yet, so it always
-  reflects "now," same as `MoneySummaryRow`. Also unlike those other
-  three features, there's no chart-driven card-selection interaction here
-  (nothing to select a metric that redraws a chart), so this stayed one
-  file rather than splitting into summary/row subcomponents. Carries an
-  explicit on-page disclaimer (estimate only, not tax advice, assumes
-  single/resident-alien/standard-deduction, doesn't model W-2 withholding,
-  consult a professional) since this is real financial guidance rendered
-  directly to the user, not decorative copy. `TaxPage.tsx` is the usual
-  thin wrapper; `/tax` added to `App.tsx`'s protected routes and a `Tax`
-  tab added to `HomePage.tsx`, mechanically identical to how
-  Spending/Budget/Income were already wired.
+  into the UI** — see the throwaway-script-verification convention in
+  Architecture above (promoted there during the 2026-07-21 cleanup pass
+  after being asserted as "established practice" here without ever
+  actually being written down). Checked 5 scenarios (all-W-2 $80k,
+  all-self-employment $60k, a mixed case, zero income, and a high-income
+  case specifically to trigger the Additional Medicare tax) against
+  hand-computed expected values, confirmed the quarterly amounts sum
+  exactly back to the annual totals for both jurisdictions, and confirmed
+  CA's Q3 installment is genuinely $0 by design rather than a bug.
+- Built `TaxContent.tsx` (`components/tax/`) — no chart-driven
+  card-selection interaction here (nothing to select a metric that
+  redraws a chart), so this stayed one file rather than splitting into
+  summary/row subcomponents. Carries an explicit on-page disclaimer since
+  this is real financial guidance rendered directly to the user, not
+  decorative copy (see the Tax bullet in Current Status for what it
+  actually says). At the time this page had no month/year navigation at
+  all — superseded by the 2026-07-21 shared-date-filter entry below.
+  `TaxPage.tsx` is the usual thin wrapper; `/tax` added to `App.tsx`'s
+  protected routes and a `Tax` tab added to `HomePage.tsx`, mechanically
+  identical to how Spending/Budget/Income were already wired.
 - Verified (see `clearbooks-verify` skill): `tsc -b`/`lint`/`build` all
   clean. Confirmed via the dev server that `/tax` and the dashboard's Tax
   tab show identical numbers (same `TaxContent` mount, same store); added
@@ -1667,13 +1726,11 @@ unique findings, not the standard checklist.
   language — a 1099-MISC, "Consultant shall be solely responsible for all
   federal, state, and local taxes"), and the 2-value `w2`/`selfEmployed`
   split didn't have a clean home for it. **Flagged up front, before
-  building anything**: a 1099 contractor is legally self-employment income
-  under federal/CA law — same SE tax, same Schedule C, same QBI
-  eligibility as freelance/gig income. There's no separate tax treatment
-  to build here, only a labeling question. Confirmed via `AskUserQuestion`
-  that this is genuinely 1099/no-withholding (not a W-2-through-an-agency
-  arrangement, which would've meant tagging it `w2` instead, not adding a
-  category at all) before touching any code.
+  building anything**, that this was a labeling question rather than a
+  tax-treatment one (see `src/types/incomeSource.ts` for why) — confirmed
+  via `AskUserQuestion` that this is genuinely 1099/no-withholding (not a
+  W-2-through-an-agency arrangement, which would've meant tagging it `w2`
+  instead, not adding a category at all) before touching any code.
 - `IncomeType` (`src/types/incomeSource.ts`) is now
   `'w2' | 'contracted' | 'selfEmployed'`. `'contracted'` and
   `'selfEmployed'` are both routed into the same `selfEmployed` bucket by
@@ -1705,3 +1762,144 @@ unique findings, not the standard checklist.
   (folded into the self-employment total, not silently dropped or
   double-counted) — then removed the test paycheck and confirmed the
   total reverted exactly to the pre-test baseline.
+
+### 2026-07-21 — Staging + production Firebase environments
+- User wanted a real staging/production split rather than the single
+  `budgetapp-67761` project everything had been running against. Rather
+  than deleting the leftover test account from that project (see the
+  2026-07-12 Firebase entry — a test account was intentionally left in
+  place there), the user repurposed the whole project as staging (see the
+  "Three environments" bullet in Current Status for the renaming caveat)
+  and created a new project for production.
+- **Caught a real setup mistake before wiring anything up**: the user's
+  first "production" config turned out to be a second **web app**
+  registered inside the *same* `budgetapp-67761` project, not a separate
+  **project** — same `projectId`/`authDomain`/`storageBucket`, only the
+  `appId` differed. Diffed the pasted `.env.production` values against
+  `.env.staging` side by side and caught this before any deploy/wiring
+  happened; a Firebase "app" registration shares the same Firestore/Auth
+  as every other app in that project, so this would have meant
+  "production" secretly reading and writing the exact same data as
+  staging, including that leftover test account. Explained the
+  project-vs-app distinction and had the user create a genuinely separate
+  project (`budgetapp-prod-f0c9a`) instead — confirmed via the corrected
+  config's distinct `projectId`.
+- Added `.env.staging`/`.env.production` and the `dev:staging`/`dev:prod`
+  npm scripts plus `.firebaserc`'s named aliases — see the "Three
+  environments" bullet in Current Status for the actual shape/reasoning.
+  `.gitignore` needed an explicit update too — its existing `.env.*.local`
+  pattern didn't cover bare `.env.staging`/`.env.production` filenames.
+- **Verified the env-mode wiring without the browser preview tools**
+  (unavailable this session): ran `vite build --mode staging` and
+  `vite build --mode production` into throwaway output directories, then
+  grepped each bundle for both projects' IDs — confirmed the staging
+  build only contains `budgetapp-67761` and the production build only
+  contains `budgetapp-prod-f0c9a`, proving Vite's mode-based env loading
+  actually resolves to the right project per script rather than assuming
+  it from the file-naming convention alone. Deleted both throwaway builds
+  afterward.
+- Per the user's own standing instruction (saved as a memory this
+  session: always ask before deploying emulator-side Firebase changes to
+  the live project), did **not** deploy `firestore.rules`/
+  `firestore.indexes.json` to the new production project as part of this
+  work — that's a separate explicit confirmation, asked for at the end
+  of the session rather than assumed from "make sure prod is set up the
+  same way as staging."
+
+### 2026-07-21 — CLAUDE.md cleanup pass
+- User asked to go over `CLAUDE.md` and remove anything unnecessary or
+  repetitive, converting genuinely repeated procedures into Skills. Ran a
+  background Explore agent to audit the whole file (by then ~1780 lines)
+  against the two skills already extracted in the 2026-07-12 cleanup pass
+  (`clearbooks-verify`, `clearbooks-add-shadcn`), rather than re-deriving
+  what's already covered.
+- **Verdict on new skills: none warranted.** The one recurring pattern
+  found — hand-verifying date/numeric logic with a throwaway script before
+  wiring it into the UI (used for `getCurrentPeriod` and the tax
+  calculations) — was asserted as "established practice" in two Session
+  Log entries but had never actually been written down anywhere reusable,
+  the same gap the 2026-07-12 pass found for the UTC-midnight and Recharts
+  gotchas. That's a documentation gap (a fact that needs stating once),
+  not a procedure with hidden mechanics worth extracting into a skill —
+  promoted it to a real Architecture bullet instead of creating a new
+  skill file.
+- Fixed a real staleness bug in Project Overview: its "Planned feature
+  areas (not yet built)" list still included budgeting envelopes, income
+  tracking, and the full tax tracker — all three had been fully built for
+  multiple sessions by this point, directly contradicted by Current
+  Status just below. Trimmed to only what's genuinely still unbuilt
+  (Plaid, OCR upload, business expense tracking, mileage, and the tax
+  tracker's still-missing pieces specifically: a tax savings fund balance
+  and year-end export).
+- Trimmed several Session Log passages (Tax estimate, Contracted-income,
+  and Staging/production entries) that had restated Current Status facts
+  in near-identical phrasing — kept each entry's session-unique reasoning
+  (the `AskUserQuestion` confirmations, the "zero logic changes" finding,
+  the web-app-vs-project catch, the build+grep verification method) and
+  replaced the restated facts with pointers back to Current Status/
+  Architecture/the relevant source file.
+- This pass also folded in the same-day global-date-filter and Firestore
+  audit-timestamp work (see the entry above) — updated Current Status/
+  Architecture for both rather than treating the doc cleanup as a
+  separate pass from the feature work it needed to describe anyway.
+
+### 2026-07-21 — Single shared date filter + Firestore audit timestamps
+- User asked for two things in one request: (1) the date filter
+  (`MonthYearPicker`) should move to the top of the screen and control
+  every tab/window at once, reversing the earlier deliberate
+  per-tab-independence design; (2) anything changed via the date filter
+  should be saved to Firestore with a created/modified timestamp. Neither
+  was obvious in scope, so both were clarified via `AskUserQuestion`
+  before touching code: confirmed the shared filter should also override
+  `MoneySummaryRow`'s previous always-current-month behavior and should
+  extend to the Tax tab (which had no date concept before); confirmed the
+  standalone routes (`/budget` etc.) should be genuinely connected to the
+  same shared state, not just independently reset (the user's own
+  framing — "isn't /budget connected to the dashboard's tabs" — is what
+  settled this, since the two weren't actually sharing state before, just
+  sharing code); and confirmed "date created/modified" meant real
+  `createdAt`/`updatedAt` audit fields on every record, not something
+  about the filter itself (which doesn't create/modify data on its own).
+- Moved `referenceDate` out of local `useState` in `BudgetContent`/
+  `SpendingContent`/`IncomeContent` into a new `useDateFilterStore`
+  (pure in-memory UI state, deliberately not Firestore-synced and
+  deliberately its own store rather than folded into `useBudgetStore`,
+  whose identity is specifically "Firestore-synced data"). `MonthYearPicker`
+  itself needed zero changes — only how it's wired changed, and it's now
+  rendered once per page (`HomePage.tsx` + each of the 4 standalone
+  page wrappers) instead of once inside each `*Content` component.
+- **Two things had to change carefully, not just get lifted mechanically**:
+  `MoneySummaryRow`'s labels ("Income this month") would have read falsely
+  while browsing history, so they now read "Income in <Month> <Year>"
+  dynamically (new `formatMonthYear` helper in `src/lib/period.ts`, also
+  reused by `MonthYearPicker`'s own trigger label instead of inlining the
+  same formatting twice). And `TaxContent` gaining a date dimension does
+  **not** mean tax rates change per month — `FEDERAL_BRACKETS_2026`/
+  `CA_BRACKETS_2025` are fixed constants with no multi-year lookup, so
+  only which month's income gets annualized and which year's quarterly
+  due dates show actually change; the on-page disclaimer now states the
+  bracket years literally instead of deriving them from the filter, to
+  avoid falsely implying the rates themselves move.
+- Added `createdAt`/`updatedAt` to all 4 synced Firestore collections via
+  `serverTimestamp()` (never client `new Date()`, to avoid trusting
+  client clocks), injected inside `src/lib/firestore/writes.ts` itself so
+  no existing call site (`AddBudgetDialog`, `AddPaycheckDialog`, etc.)
+  needed to change what it supplies. `firestore.rules` gained a shared
+  `hasValidTimestamps()` helper (matching the existing `isOwner()`
+  factoring) requiring both fields equal `request.time` — checked only on
+  `create`, since none of these 4 entities has an update path yet (every
+  "add" is always a brand-new document); the update rules were split out
+  from create specifically so a hypothetical future edit feature doesn't
+  inherit a same-as-create timestamp requirement that would force
+  `createdAt` to be overwritten on every edit.
+- **Caught a real gap while implementing**: `src/lib/firestore/demoData.ts`'s
+  `loadDemoData` writes via `writeBatch` directly, bypassing `writes.ts`
+  entirely — meaning it wouldn't have set `createdAt`/`updatedAt` at all,
+  which would have made "Load demo data" fail outright against the new
+  `hasValidTimestamps()` rule. Fixed by injecting `serverTimestamp()`
+  directly into each of that function's batched writes too.
+- Verified (see `clearbooks-verify` skill): `tsc -b`/`lint`/`build` all
+  clean. This session's rules changes (`hasValidTimestamps()`) have
+  **not** been deployed to either the staging or production Firebase
+  project yet — per the user's own standing instruction, that's a
+  separate explicit confirmation still to be asked for.

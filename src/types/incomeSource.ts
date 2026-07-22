@@ -23,4 +23,8 @@ export interface IncomeSource {
   color: ChartColorToken
   isCustom?: boolean
   incomeType: IncomeType
+  // Server-assigned audit timestamps — see Paycheck/Purchase for why these
+  // are optional and distinct from any user-entered date.
+  createdAt?: string
+  updatedAt?: string
 }

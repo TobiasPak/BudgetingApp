@@ -77,6 +77,17 @@ export function defaultDateForReference(referenceDate: Date): string {
   return formatIsoDate(base.getFullYear(), base.getMonth() + 1, base.getDate())
 }
 
+// "July 2026" — shared by MonthYearPicker's trigger label and
+// MoneySummaryRow's "in <Month> <Year>" wording when browsing a past month,
+// so both stay in sync if the display format ever changes.
+export function formatMonthYear(date: Date): string {
+  const formatter = new Intl.DateTimeFormat(undefined, {
+    month: 'long',
+    year: 'numeric',
+  })
+  return formatter.format(date)
+}
+
 // "Jul 5 – Aug 4" — parses the ISO string's own components rather than
 // `new Date(isoString)`, which parses as UTC midnight and can display as
 // the previous day in negative UTC-offset timezones.

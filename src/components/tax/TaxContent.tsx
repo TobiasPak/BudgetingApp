@@ -1,6 +1,7 @@
 import { TriangleAlert } from 'lucide-react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { useBudgetStore } from '@/stores/useBudgetStore'
+import { useDateFilterStore } from '@/stores/useDateFilterStore'
 import { getAnnualizedIncomeByType } from '@/lib/income'
 import { calculateFederalTax } from '@/lib/tax/federal'
 import { calculateCaliforniaTax } from '@/lib/tax/california'
@@ -26,15 +27,23 @@ function LineItem({ label, value, emphasis }: LineItemProps) {
   )
 }
 
-// No month/year navigation here, unlike Budget/Spending/Income — tax is an
-// annual calculation off annualized current-month income, and there's no
-// "which year" picker anywhere in this app to hook into yet. Always
-// reflects "now," same as MoneySummaryRow.
+// Now shares the app-wide date filter (useDateFilterStore) — browsing to a
+// past month changes which month's income gets annualized and which year's
+// quarterly due dates are shown. It does NOT change which tax brackets
+// apply: FEDERAL_BRACKETS_2026/CA_BRACKETS_2025 are fixed constants with no
+// multi-year lookup, so the disclaimer states those years literally rather
+// than deriving them from referenceDate — deriving them would falsely
+// imply the rates themselves change when browsing to a different year.
 export function TaxContent() {
   const paychecks = useBudgetStore((state) => state.paychecks)
   const incomeSources = useBudgetStore((state) => state.incomeSources)
+  const referenceDate = useDateFilterStore((state) => state.referenceDate)
 
-  const { w2, selfEmployed } = getAnnualizedIncomeByType(paychecks, incomeSources)
+  const { w2, selfEmployed } = getAnnualizedIncomeByType(
+    paychecks,
+    incomeSources,
+    referenceDate
+  )
   const federal = calculateFederalTax({
     w2Income: w2,
     selfEmploymentIncome: selfEmployed,
@@ -45,13 +54,12 @@ export function TaxContent() {
   })
   const totalTax = federal.totalFederalTax + california.totalCaliforniaTax
 
-  const currentYear = new Date().getFullYear()
   const quarters = getQuarterlyEstimates(
     {
       federalTotal: federal.totalFederalTax,
       californiaTotal: california.totalCaliforniaTax,
     },
-    currentYear
+    referenceDate.getFullYear()
   )
 
   return (
@@ -61,13 +69,14 @@ export function TaxContent() {
         <p className="text-muted-foreground">
           Estimate only, not tax advice. Assumes a single filer, resident
           alien federal tax status, and the standard deduction — no
-          itemizing or credits. Federal figures use {currentYear} brackets;
+          itemizing or credits. Federal figures use 2026 brackets;
           California figures use the most recently confirmed (2025)
-          brackets. Self-employment "net profit" is modeled as gross
-          self-employment income logged, since this app doesn't track
-          business expenses yet. Doesn't account for any W-2 withholding
-          your employer already sends in. Consult a tax professional for
-          actual filing.
+          brackets — these are fixed and don't change when browsing to a
+          different month/year above. Self-employment "net profit" is
+          modeled as gross self-employment income logged, since this app
+          doesn't track business expenses yet. Doesn't account for any W-2
+          withholding your employer already sends in. Consult a tax
+          professional for actual filing.
         </p>
       </div>
 

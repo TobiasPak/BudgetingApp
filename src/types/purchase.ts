@@ -6,4 +6,8 @@ export interface Purchase {
   date: string
   description: string
   amount: number
+  // Server-assigned audit timestamps — see Paycheck for why these are
+  // distinct from `date` and why they're optional.
+  createdAt?: string
+  updatedAt?: string
 }

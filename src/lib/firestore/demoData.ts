@@ -1,4 +1,4 @@
-import { collection, doc, writeBatch } from 'firebase/firestore'
+import { collection, doc, serverTimestamp, writeBatch } from 'firebase/firestore'
 import { db } from '@/lib/firebase'
 import {
   demoCategories,
@@ -17,20 +17,41 @@ import {
 // paychecks'/purchases' sourceId/categoryId references resolve correctly;
 // paychecks and purchases themselves get normal auto-generated ids since
 // nothing references them by id.
+//
+// This bypasses src/lib/firestore/writes.ts entirely (writeBatch doesn't
+// compose with those single-doc functions), so createdAt/updatedAt are
+// injected here directly instead — firestore.rules requires both on every
+// create, so skipping this would make demo-data loading fail outright.
 export async function loadDemoData(uid: string): Promise<void> {
   const batch = writeBatch(db)
 
   for (const { id, ...data } of demoCategories) {
-    batch.set(doc(db, 'users', uid, 'categories', id), data)
+    batch.set(doc(db, 'users', uid, 'categories', id), {
+      ...data,
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+    })
   }
   for (const { id, ...data } of demoIncomeSources) {
-    batch.set(doc(db, 'users', uid, 'incomeSources', id), data)
+    batch.set(doc(db, 'users', uid, 'incomeSources', id), {
+      ...data,
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+    })
   }
   for (const paycheck of demoPaychecks) {
-    batch.set(doc(collection(db, 'users', uid, 'paychecks')), paycheck)
+    batch.set(doc(collection(db, 'users', uid, 'paychecks')), {
+      ...paycheck,
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+    })
   }
   for (const purchase of demoPurchases) {
-    batch.set(doc(collection(db, 'users', uid, 'purchases')), purchase)
+    batch.set(doc(collection(db, 'users', uid, 'purchases')), {
+      ...purchase,
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+    })
   }
   batch.set(
     doc(db, 'users', uid),

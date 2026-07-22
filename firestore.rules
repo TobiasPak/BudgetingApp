@@ -5,6 +5,21 @@ service cloud.firestore {
       return request.auth != null && request.auth.uid == userId;
     }
 
+    // createdAt/updatedAt are set via serverTimestamp() (see
+    // src/lib/firestore/writes.ts) — this rejects any write that doesn't
+    // set both to the server's own authoritative time, so a client can't
+    // spoof an earlier/later timestamp. Only checked on create: there's no
+    // update path for any of these 4 collections yet (every write is a
+    // brand-new document), so an update rule requiring this doesn't have
+    // a real use case to validate against yet. When an edit feature is
+    // eventually built, the update rule should require
+    // `updatedAt == request.time` and `createdAt == resource.data.createdAt`
+    // (unchanged) instead of this same check.
+    function hasValidTimestamps() {
+      return request.resource.data.createdAt == request.time
+        && request.resource.data.updatedAt == request.time;
+    }
+
     match /users/{userId} {
       allow read: if isOwner(userId);
       allow create: if isOwner(userId);
@@ -15,7 +30,14 @@ service cloud.firestore {
 
       match /categories/{categoryId} {
         allow read, delete: if isOwner(userId);
-        allow create, update: if isOwner(userId)
+        allow create: if isOwner(userId)
+          && request.resource.data.name is string
+          && request.resource.data.iconName is string
+          && request.resource.data.color is string
+          && request.resource.data.resetDay is number
+          && request.resource.data.type in ['fixed', 'percentage']
+          && hasValidTimestamps();
+        allow update: if isOwner(userId)
           && request.resource.data.name is string
           && request.resource.data.iconName is string
           && request.resource.data.color is string
@@ -25,7 +47,13 @@ service cloud.firestore {
 
       match /incomeSources/{sourceId} {
         allow read, delete: if isOwner(userId);
-        allow create, update: if isOwner(userId)
+        allow create: if isOwner(userId)
+          && request.resource.data.name is string
+          && request.resource.data.iconName is string
+          && request.resource.data.color is string
+          && request.resource.data.incomeType in ['w2', 'contracted', 'selfEmployed']
+          && hasValidTimestamps();
+        allow update: if isOwner(userId)
           && request.resource.data.name is string
           && request.resource.data.iconName is string
           && request.resource.data.color is string
@@ -34,7 +62,12 @@ service cloud.firestore {
 
       match /paychecks/{paycheckId} {
         allow read, delete: if isOwner(userId);
-        allow create, update: if isOwner(userId)
+        allow create: if isOwner(userId)
+          && request.resource.data.amount is number && request.resource.data.amount > 0
+          && request.resource.data.date is string
+          && request.resource.data.sourceId is string
+          && hasValidTimestamps();
+        allow update: if isOwner(userId)
           && request.resource.data.amount is number && request.resource.data.amount > 0
           && request.resource.data.date is string
           && request.resource.data.sourceId is string;
@@ -42,7 +75,13 @@ service cloud.firestore {
 
       match /purchases/{purchaseId} {
         allow read, delete: if isOwner(userId);
-        allow create, update: if isOwner(userId)
+        allow create: if isOwner(userId)
+          && request.resource.data.amount is number && request.resource.data.amount > 0
+          && request.resource.data.date is string
+          && request.resource.data.categoryId is string
+          && request.resource.data.description is string
+          && hasValidTimestamps();
+        allow update: if isOwner(userId)
           && request.resource.data.amount is number && request.resource.data.amount > 0
           && request.resource.data.date is string
           && request.resource.data.categoryId is string

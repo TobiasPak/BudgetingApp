@@ -1,8 +1,10 @@
 import { Banknote, PiggyBank, Receipt } from 'lucide-react'
 import { Card, CardContent } from '@/components/ui/card'
 import { useBudgetStore } from '@/stores/useBudgetStore'
+import { useDateFilterStore } from '@/stores/useDateFilterStore'
 import { getLeftoverCash, getMonthlyIncome } from '@/lib/income'
 import { getTotalSpent } from '@/lib/spending'
+import { formatMonthYear } from '@/lib/period'
 import { cn, formatCurrency } from '@/lib/utils'
 
 export type PanelTone = 'info' | 'success' | 'warning' | 'destructive'
@@ -21,18 +23,27 @@ export const toneClasses: Record<
   },
 }
 
-// Always the current month, independent of whatever historical month any
-// dashboard tab below might be browsing to — this is the at-a-glance strip,
-// not a historical ledger view (same "dashboard live content always shows
-// now" convention the rest of the app already follows).
+// Shares the app-wide date filter (useDateFilterStore) — no longer always
+// the current month. Labels read "in <Month> <Year>" while browsing a past
+// month, and "this month" when back on the current one, so the strip never
+// silently claims to be "this month" while actually showing history.
 export function MoneySummaryRow() {
   const categories = useBudgetStore((state) => state.categories)
   const paychecks = useBudgetStore((state) => state.paychecks)
   const purchases = useBudgetStore((state) => state.purchases)
+  const referenceDate = useDateFilterStore((state) => state.referenceDate)
 
-  const monthlyIncome = getMonthlyIncome(paychecks)
-  const totalSpent = getTotalSpent(categories, purchases)
-  const leftover = getLeftoverCash(paychecks, categories, purchases)
+  const today = new Date()
+  const isCurrentMonth =
+    referenceDate.getFullYear() === today.getFullYear() &&
+    referenceDate.getMonth() === today.getMonth()
+  const periodLabel = isCurrentMonth
+    ? 'this month'
+    : `in ${formatMonthYear(referenceDate)}`
+
+  const monthlyIncome = getMonthlyIncome(paychecks, referenceDate)
+  const totalSpent = getTotalSpent(categories, purchases, referenceDate)
+  const leftover = getLeftoverCash(paychecks, categories, purchases, referenceDate)
   const spentPercentOfIncome =
     monthlyIncome > 0 ? (totalSpent / monthlyIncome) * 100 : 0
   const leftoverTone: PanelTone = leftover < 0 ? 'destructive' : 'success'
@@ -43,13 +54,13 @@ export function MoneySummaryRow() {
         <Segment
           icon={Banknote}
           tone="success"
-          label="Income this month"
+          label={`Income ${periodLabel}`}
           value={`$${monthlyIncome.toLocaleString()}`}
         />
         <Segment
           icon={Receipt}
           tone="info"
-          label="Spent this month"
+          label={`Spent ${periodLabel}`}
           value={`$${formatCurrency(totalSpent)}`}
           sub={
             monthlyIncome > 0

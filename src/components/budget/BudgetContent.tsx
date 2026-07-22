@@ -1,26 +1,25 @@
-import { useState } from 'react'
 import { BudgetEnvelopeRow } from '@/components/budget/BudgetEnvelopeRow'
 import { BudgetSummary } from '@/components/budget/BudgetSummary'
 import { IncomeOverview } from '@/components/budget/IncomeOverview'
 import { AddBudgetDialog } from '@/components/budget/AddBudgetDialog'
-import { MonthYearPicker } from '@/components/budget/MonthYearPicker'
 import { useBudgetStore } from '@/stores/useBudgetStore'
+import { useDateFilterStore } from '@/stores/useDateFilterStore'
 import {
   getAveragePaycheckAmount,
   getMonthlyIncome,
   getMonthlyTarget,
 } from '@/lib/income'
 
-// Owns its own referenceDate state (rather than accepting it as a prop) so
-// this can be mounted twice independently — once as the standalone
-// BudgetPage, once inside a dashboard tab — each with its own month
-// navigation, with no state to lift or thread from a shared parent.
+// Reads referenceDate from the shared useDateFilterStore rather than
+// owning its own state — this mounts independently (once as the standalone
+// BudgetPage, once inside a dashboard tab), but both now deliberately share
+// the same date filter rather than navigating independently.
 export function BudgetContent() {
   const categories = useBudgetStore((state) => state.categories)
   const paychecks = useBudgetStore((state) => state.paychecks)
   const paychecksPerMonth = useBudgetStore((state) => state.paychecksPerMonth)
 
-  const [referenceDate, setReferenceDate] = useState<Date>(() => new Date())
+  const referenceDate = useDateFilterStore((state) => state.referenceDate)
 
   const monthlyIncome = getMonthlyIncome(paychecks, referenceDate)
   const averagePaycheckAmount = getAveragePaycheckAmount(paychecks)
@@ -28,8 +27,6 @@ export function BudgetContent() {
 
   return (
     <>
-      <MonthYearPicker value={referenceDate} onChange={setReferenceDate} />
-
       <IncomeOverview referenceDate={referenceDate} />
 
       <BudgetSummary referenceDate={referenceDate} />

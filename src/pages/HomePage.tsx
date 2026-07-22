@@ -3,15 +3,19 @@ import { MoneySummaryRow } from '@/components/dashboard/MoneySummaryRow'
 import { LoadDemoDataButton } from '@/components/dashboard/LoadDemoDataButton'
 import { SignOutButton } from '@/components/auth/SignOutButton'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import { MonthYearPicker } from '@/components/budget/MonthYearPicker'
 import { SpendingContent } from '@/components/spending/SpendingContent'
 import { BudgetContent } from '@/components/budget/BudgetContent'
 import { IncomeContent } from '@/components/income/IncomeContent'
 import { TaxContent } from '@/components/tax/TaxContent'
+import { useDateFilterStore } from '@/stores/useDateFilterStore'
 
 type DashboardTab = 'spending' | 'budget' | 'income' | 'tax'
 
 export default function HomePage() {
   const [activeTab, setActiveTab] = useState<DashboardTab>('spending')
+  const referenceDate = useDateFilterStore((state) => state.referenceDate)
+  const setReferenceDate = useDateFilterStore((state) => state.setReferenceDate)
 
   return (
     <main className="mx-auto flex max-w-4xl flex-col gap-6 px-4 py-8">
@@ -22,6 +26,12 @@ export default function HomePage() {
           <SignOutButton />
         </div>
       </div>
+
+      {/* One shared date filter at the top of the screen — controls
+          MoneySummaryRow below and every tab's content, all reading from
+          the same useDateFilterStore rather than each tab navigating
+          independently. */}
+      <MonthYearPicker value={referenceDate} onChange={setReferenceDate} />
 
       <Tabs
         value={activeTab}

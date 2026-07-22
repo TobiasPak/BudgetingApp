@@ -13,6 +13,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
+import { formatMonthYear } from '@/lib/period'
 
 const MONTH_NAMES = [
   'January',
@@ -80,7 +81,7 @@ export function MonthYearPicker({ value, onChange }: MonthYearPickerProps) {
         <PopoverTrigger asChild>
           <Button variant="outline" size="sm" className="gap-1.5">
             <CalendarDays className="size-3.5" />
-            {MONTH_NAMES[value.getMonth()]} {value.getFullYear()}
+            {formatMonthYear(value)}
           </Button>
         </PopoverTrigger>
         <PopoverContent className="w-64">

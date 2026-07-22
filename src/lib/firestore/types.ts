@@ -1,11 +1,18 @@
+import type { Timestamp } from 'firebase/firestore'
 import type { ChartColorToken } from '@/types/budget'
 import type { IncomeType } from '@/types/incomeSource'
 
 // Firestore document shapes — the on-disk/on-wire representation of each
 // entity. Distinct from the in-memory app types (BudgetCategory, Paycheck,
-// etc.) mainly in one respect: `icon: LucideIcon` becomes `iconName:
-// string` here, since a component reference isn't serializable. The
-// Firestore sync layer (sync.ts) is what converts between the two shapes.
+// etc.) in two respects: `icon: LucideIcon` becomes `iconName: string`
+// here (a component reference isn't serializable), and `createdAt`/
+// `updatedAt` are Firestore `Timestamp`s here vs. ISO strings in memory.
+// The Firestore sync layer (sync.ts) converts between both shapes.
+//
+// `createdAt`/`updatedAt` are deliberately optional and absent from what
+// callers (AddBudgetDialog, AddPaycheckDialog, etc.) need to supply —
+// writes.ts injects them via serverTimestamp() when actually writing, so
+// no caller ever constructs one directly.
 
 interface FirestoreCategoryDocBase {
   name: string
@@ -13,6 +20,8 @@ interface FirestoreCategoryDocBase {
   color: ChartColorToken
   isCustom?: boolean
   resetDay: number
+  createdAt?: Timestamp
+  updatedAt?: Timestamp
 }
 
 export interface FirestoreFixedCategoryDoc extends FirestoreCategoryDocBase {
@@ -37,12 +46,16 @@ export interface FirestoreIncomeSourceDoc {
   color: ChartColorToken
   isCustom?: boolean
   incomeType: IncomeType
+  createdAt?: Timestamp
+  updatedAt?: Timestamp
 }
 
 export interface FirestorePaycheckDoc {
   amount: number
   date: string
   sourceId: string
+  createdAt?: Timestamp
+  updatedAt?: Timestamp
 }
 
 export interface FirestorePurchaseDoc {
@@ -50,6 +63,8 @@ export interface FirestorePurchaseDoc {
   categoryId: string
   date: string
   description: string
+  createdAt?: Timestamp
+  updatedAt?: Timestamp
 }
 
 // The users/{uid} root doc — scalars only, not a collection.

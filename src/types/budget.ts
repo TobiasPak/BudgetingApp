@@ -26,6 +26,11 @@ interface BudgetCategoryBase {
   // falls outside the newly-current period, it just stops counting — no
   // stored total to manually zero out, unlike the old monthlySpent field.
   resetDay: number
+  // Server-assigned audit timestamps — when this category was actually
+  // created/edited in Firestore, distinct from any user-entered date.
+  // Optional: categories written before this field existed don't have one.
+  createdAt?: string
+  updatedAt?: string
 }
 
 // A flat dollar target, e.g. "$250/mo for groceries" — same shape as the

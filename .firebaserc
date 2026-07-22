@@ -1,6 +1,8 @@
 {
   "projects": {
-    "default": "budgetapp-67761"
+    "default": "budgetapp-67761",
+    "staging": "budgetapp-67761",
+    "production": "budgetapp-prod-f0c9a"
   },
   "targets": {},
   "etags": {}

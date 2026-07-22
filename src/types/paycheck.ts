@@ -10,4 +10,12 @@ export interface Paycheck {
   // income can be broken down by source the same way spending is broken
   // down by budget category.
   sourceId: string
+  // Server-assigned audit timestamps (ISO datetime strings, converted from
+  // Firestore Timestamps in src/lib/firestore/sync.ts) — distinct from
+  // `date` above, which is the user-entered transaction date, not when the
+  // record was actually created/edited. Optional: documents written before
+  // this field existed simply don't have one; no synthetic value is
+  // fabricated for them.
+  createdAt?: string
+  updatedAt?: string
 }

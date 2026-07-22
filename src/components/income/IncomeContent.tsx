@@ -1,26 +1,23 @@
-import { useState } from 'react'
-import { MonthYearPicker } from '@/components/budget/MonthYearPicker'
 import { IncomeSummary } from '@/components/income/IncomeSummary'
 import { IncomeSourceRow } from '@/components/income/IncomeSourceRow'
 import { AddIncomeSourceDialog } from '@/components/income/AddIncomeSourceDialog'
 import { useBudgetStore } from '@/stores/useBudgetStore'
+import { useDateFilterStore } from '@/stores/useDateFilterStore'
 import { getMonthlyIncome, getSourceMonthlyIncome } from '@/lib/income'
 
-// Owns its own referenceDate state — same reasoning as BudgetContent, lets
-// this mount independently as both the standalone IncomePage and a
-// dashboard tab.
+// Reads referenceDate from the shared useDateFilterStore — same reasoning
+// as BudgetContent, lets this mount independently as both the standalone
+// IncomePage and a dashboard tab while sharing one date filter.
 export function IncomeContent() {
   const incomeSources = useBudgetStore((state) => state.incomeSources)
   const paychecks = useBudgetStore((state) => state.paychecks)
 
-  const [referenceDate, setReferenceDate] = useState<Date>(() => new Date())
+  const referenceDate = useDateFilterStore((state) => state.referenceDate)
 
   const monthlyIncome = getMonthlyIncome(paychecks, referenceDate)
 
   return (
     <>
-      <MonthYearPicker value={referenceDate} onChange={setReferenceDate} />
-
       <IncomeSummary referenceDate={referenceDate} />
 
       <div className="flex items-center justify-between">

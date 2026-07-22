@@ -1,4 +1,10 @@
-import { collection, deleteDoc, doc, setDoc } from 'firebase/firestore'
+import {
+  collection,
+  deleteDoc,
+  doc,
+  serverTimestamp,
+  setDoc,
+} from 'firebase/firestore'
 import { db } from '@/lib/firebase'
 import type {
   FirestoreCategoryDoc,
@@ -11,17 +17,35 @@ import type {
 // Every write here targets `users/{uid}/...` — the caller (useBudgetStore)
 // is responsible for knowing which uid is signed in and never calling these
 // when signed out.
+//
+// Every create* function below injects createdAt/updatedAt via
+// serverTimestamp() itself — callers never supply these. There's no
+// update path for any of these 4 entities yet (every "add" is always a
+// brand-new document, never an in-place edit), so updatedAt always equals
+// createdAt for now; that's expected, not a bug.
 
 export function writeCategory(uid: string, category: FirestoreCategoryDoc) {
-  return setDoc(doc(collection(db, 'users', uid, 'categories')), category)
+  return setDoc(doc(collection(db, 'users', uid, 'categories')), {
+    ...category,
+    createdAt: serverTimestamp(),
+    updatedAt: serverTimestamp(),
+  })
 }
 
 export function writeIncomeSource(uid: string, source: FirestoreIncomeSourceDoc) {
-  return setDoc(doc(collection(db, 'users', uid, 'incomeSources')), source)
+  return setDoc(doc(collection(db, 'users', uid, 'incomeSources')), {
+    ...source,
+    createdAt: serverTimestamp(),
+    updatedAt: serverTimestamp(),
+  })
 }
 
 export function writePaycheck(uid: string, paycheck: FirestorePaycheckDoc) {
-  return setDoc(doc(collection(db, 'users', uid, 'paychecks')), paycheck)
+  return setDoc(doc(collection(db, 'users', uid, 'paychecks')), {
+    ...paycheck,
+    createdAt: serverTimestamp(),
+    updatedAt: serverTimestamp(),
+  })
 }
 
 export function deletePaycheck(uid: string, id: string) {
@@ -29,7 +53,11 @@ export function deletePaycheck(uid: string, id: string) {
 }
 
 export function writePurchase(uid: string, purchase: FirestorePurchaseDoc) {
-  return setDoc(doc(collection(db, 'users', uid, 'purchases')), purchase)
+  return setDoc(doc(collection(db, 'users', uid, 'purchases')), {
+    ...purchase,
+    createdAt: serverTimestamp(),
+    updatedAt: serverTimestamp(),
+  })
 }
 
 export function deletePurchase(uid: string, id: string) {

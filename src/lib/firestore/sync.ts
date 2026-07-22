@@ -1,4 +1,10 @@
-import { collection, doc, onSnapshot, type Unsubscribe } from 'firebase/firestore'
+import {
+  collection,
+  doc,
+  onSnapshot,
+  Timestamp,
+  type Unsubscribe,
+} from 'firebase/firestore'
 import { db } from '@/lib/firebase'
 import { getIcon } from '@/lib/iconMap'
 import type { BudgetCategory } from '@/types/budget'
@@ -12,6 +18,13 @@ import type {
   FirestorePurchaseDoc,
   FirestoreUserDoc,
 } from './types'
+
+// Converts a Firestore Timestamp to an ISO datetime string for the
+// in-memory types. Docs written before createdAt/updatedAt existed have no
+// value here — returns undefined rather than fabricating one.
+function timestampToIso(ts: Timestamp | undefined): string | undefined {
+  return ts?.toDate().toISOString()
+}
 
 interface SyncCallbacks {
   onCategories: (categories: BudgetCategory[]) => void
@@ -33,6 +46,8 @@ function categoryDocToCategory(id: string, data: FirestoreCategoryDoc): BudgetCa
     color: data.color,
     isCustom: data.isCustom,
     resetDay: data.resetDay,
+    createdAt: timestampToIso(data.createdAt),
+    updatedAt: timestampToIso(data.updatedAt),
   }
   return data.type === 'fixed'
     ? { ...base, type: 'fixed', monthlyAmount: data.monthlyAmount }
@@ -52,6 +67,31 @@ function incomeSourceDocToSource(id: string, data: FirestoreIncomeSourceDoc): In
     // silently understating it (missing SE tax entirely). The former is the
     // safer failure mode for a tax estimate.
     incomeType: data.incomeType ?? 'selfEmployed',
+    createdAt: timestampToIso(data.createdAt),
+    updatedAt: timestampToIso(data.updatedAt),
+  }
+}
+
+function paycheckDocToPaycheck(id: string, data: FirestorePaycheckDoc): Paycheck {
+  return {
+    id,
+    amount: data.amount,
+    date: data.date,
+    sourceId: data.sourceId,
+    createdAt: timestampToIso(data.createdAt),
+    updatedAt: timestampToIso(data.updatedAt),
+  }
+}
+
+function purchaseDocToPurchase(id: string, data: FirestorePurchaseDoc): Purchase {
+  return {
+    id,
+    categoryId: data.categoryId,
+    date: data.date,
+    description: data.description,
+    amount: data.amount,
+    createdAt: timestampToIso(data.createdAt),
+    updatedAt: timestampToIso(data.updatedAt),
   }
 }
 
@@ -101,19 +141,17 @@ export function attachListeners(uid: string, callbacks: SyncCallbacks): Unsubscr
     }),
     onSnapshot(paychecksRef, (snapshot) => {
       callbacks.onPaychecks(
-        snapshot.docs.map((d) => ({
-          id: d.id,
-          ...(d.data() as FirestorePaycheckDoc),
-        }))
+        snapshot.docs.map((d) =>
+          paycheckDocToPaycheck(d.id, d.data() as FirestorePaycheckDoc)
+        )
       )
       markFired('paychecks')
     }),
     onSnapshot(purchasesRef, (snapshot) => {
       callbacks.onPurchases(
-        snapshot.docs.map((d) => ({
-          id: d.id,
-          ...(d.data() as FirestorePurchaseDoc),
-        }))
+        snapshot.docs.map((d) =>
+          purchaseDocToPurchase(d.id, d.data() as FirestorePurchaseDoc)
+        )
       )
       markFired('purchases')
     }),
