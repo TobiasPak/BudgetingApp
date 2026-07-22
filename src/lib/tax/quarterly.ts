@@ -49,8 +49,8 @@ export function getQuarterlyEstimates(
 
 // "Apr 15, 2026" — parses the ISO string's own Y/M/D components rather than
 // `new Date(isoString)`, which parses as UTC midnight and can display as
-// the previous day in negative UTC-offset timezones (same convention as
-// formatPeriodRange in src/lib/period.ts).
+// the previous day in negative UTC-offset timezones (same convention used
+// throughout src/lib/period.ts).
 export function formatDueDate(isoDate: string): string {
   const [year, month, day] = isoDate.split('-').map(Number)
   const formatter = new Intl.DateTimeFormat(undefined, {

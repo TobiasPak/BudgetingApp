@@ -5,9 +5,20 @@ import { Trash2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from '@/components/ui/alert-dialog'
 import { useBudgetStore } from '@/stores/useBudgetStore'
 import { getCategoryPurchases } from '@/lib/purchases'
-import { defaultDateForReference } from '@/lib/period'
+import { defaultDateForRange, type DateRange } from '@/lib/period'
 import { addPurchaseSchema, type AddPurchaseInput } from '@/lib/schemas/budget'
 import { formatCurrency } from '@/lib/utils'
 import type { BudgetCategory } from '@/types/budget'
@@ -25,19 +36,17 @@ function formatPurchaseDate(dateStr: string) {
 
 interface CategoryPurchasesProps {
   category: BudgetCategory
-  referenceDate: Date
+  range: DateRange
 }
 
-export function CategoryPurchases({
-  category,
-  referenceDate,
-}: CategoryPurchasesProps) {
+export function CategoryPurchases({ category, range }: CategoryPurchasesProps) {
   const purchases = useBudgetStore((state) => state.purchases)
   const addPurchase = useBudgetStore((state) => state.addPurchase)
   const removePurchase = useBudgetStore((state) => state.removePurchase)
+  const removeCategory = useBudgetStore((state) => state.removeCategory)
 
-  const categoryPurchases = getCategoryPurchases(purchases, category, referenceDate)
-  const defaultDate = defaultDateForReference(referenceDate)
+  const categoryPurchases = getCategoryPurchases(purchases, category, range)
+  const defaultDate = defaultDateForRange(range)
 
   const {
     register,
@@ -51,16 +60,17 @@ export function CategoryPurchases({
 
   function onSubmit(data: AddPurchaseInput) {
     addPurchase({ categoryId: category.id, ...data })
-    reset({ date: defaultDateForReference(referenceDate), description: '' })
+    reset({ date: defaultDateForRange(range), description: '' })
   }
 
   // useForm's defaultValues only apply at mount — this component stays
-  // mounted while the user navigates months via MonthYearPicker (it doesn't
+  // mounted while the user navigates the shared date filter (it doesn't
   // collapse/re-expand), so without this the date field would keep
-  // defaulting to whatever month was active when the row was first expanded.
+  // defaulting to whatever window was active when the row was first
+  // expanded.
   useEffect(() => {
-    reset({ date: defaultDateForReference(referenceDate), description: '' })
-  }, [referenceDate, reset])
+    reset({ date: defaultDateForRange(range), description: '' })
+  }, [range, reset])
 
   return (
     <div
@@ -146,6 +156,36 @@ export function CategoryPurchases({
             errors.amount?.message}
         </p>
       )}
+
+      <div className="flex justify-end border-t pt-3">
+        <AlertDialog>
+          <AlertDialogTrigger asChild>
+            <Button variant="destructive" size="sm">
+              <Trash2 className="size-3.5" />
+              Delete category
+            </Button>
+          </AlertDialogTrigger>
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>Delete "{category.name}"?</AlertDialogTitle>
+              <AlertDialogDescription>
+                This permanently deletes the category and every purchase ever
+                logged under it — not just what's shown for the currently
+                selected month/year. This can't be undone.
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel>Cancel</AlertDialogCancel>
+              <AlertDialogAction
+                variant="destructive"
+                onClick={() => removeCategory(category.id)}
+              >
+                Delete
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
+      </div>
     </div>
   )
 }

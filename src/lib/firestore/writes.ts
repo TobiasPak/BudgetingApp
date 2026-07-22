@@ -2,8 +2,12 @@ import {
   collection,
   deleteDoc,
   doc,
+  getDocs,
+  query,
   serverTimestamp,
   setDoc,
+  where,
+  writeBatch,
 } from 'firebase/firestore'
 import { db } from '@/lib/firebase'
 import type {
@@ -66,4 +70,36 @@ export function deletePurchase(uid: string, id: string) {
 
 export function writeUserFields(uid: string, fields: Partial<FirestoreUserDoc>) {
   return setDoc(doc(db, 'users', uid), fields, { merge: true })
+}
+
+// Cascading deletes — deleting a category/income source also deletes every
+// purchase/paycheck ever logged against it (not just what's in the
+// currently-viewed date range), so no orphaned records are left pointing at
+// an id that no longer exists. One writeBatch (category doc + its
+// purchases, well under the 500-op cap for a personal-scale dataset),
+// mirroring the batch pattern already used in demoData.ts.
+export async function deleteCategory(uid: string, categoryId: string) {
+  const purchasesToDelete = await getDocs(
+    query(
+      collection(db, 'users', uid, 'purchases'),
+      where('categoryId', '==', categoryId)
+    )
+  )
+  const batch = writeBatch(db)
+  purchasesToDelete.forEach((purchaseDoc) => batch.delete(purchaseDoc.ref))
+  batch.delete(doc(db, 'users', uid, 'categories', categoryId))
+  return batch.commit()
+}
+
+export async function deleteIncomeSource(uid: string, sourceId: string) {
+  const paychecksToDelete = await getDocs(
+    query(
+      collection(db, 'users', uid, 'paychecks'),
+      where('sourceId', '==', sourceId)
+    )
+  )
+  const batch = writeBatch(db)
+  paychecksToDelete.forEach((paycheckDoc) => batch.delete(paycheckDoc.ref))
+  batch.delete(doc(db, 'users', uid, 'incomeSources', sourceId))
+  return batch.commit()
 }

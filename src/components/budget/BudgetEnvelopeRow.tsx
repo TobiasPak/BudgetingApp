@@ -3,7 +3,7 @@ import { AlertTriangle, ChevronDown } from 'lucide-react'
 import { Progress } from '@/components/ui/progress'
 import { cn, formatCurrency } from '@/lib/utils'
 import { isOverBudget, progressPercent } from '@/lib/budget'
-import { getCurrentPeriod, formatPeriodRange } from '@/lib/period'
+import { formatRangeLabel, type DateFilterMode, type DateRange } from '@/lib/period'
 import { getCategorySpent } from '@/lib/purchases'
 import { useBudgetStore } from '@/stores/useBudgetStore'
 import { CategoryPurchases } from '@/components/budget/CategoryPurchases'
@@ -24,22 +24,23 @@ const basisLabel: Record<'paycheck' | 'monthlyIncome', string> = {
 
 interface BudgetEnvelopeRowProps {
   category: BudgetCategory
-  monthlyTarget: number
-  referenceDate: Date
+  target: number
+  mode: DateFilterMode
+  range: DateRange
 }
 
 export function BudgetEnvelopeRow({
   category,
-  monthlyTarget,
-  referenceDate,
+  target,
+  mode,
+  range,
 }: BudgetEnvelopeRowProps) {
   const [isExpanded, setIsExpanded] = useState(false)
   const purchases = useBudgetStore((state) => state.purchases)
 
-  const spent = getCategorySpent(purchases, category, referenceDate)
-  const overBudget = isOverBudget(spent, monthlyTarget)
+  const spent = getCategorySpent(purchases, category, range)
+  const overBudget = isOverBudget(spent, target)
   const Icon = category.icon
-  const period = getCurrentPeriod(category.resetDay, referenceDate)
 
   return (
     <div data-slot="budget-envelope-row">
@@ -49,9 +50,9 @@ export function BudgetEnvelopeRow({
         aria-expanded={isExpanded}
         className="flex w-full flex-col gap-2 px-4 py-3 text-left transition-colors hover:bg-muted/50 sm:flex-row sm:items-center sm:gap-4"
       >
-        {/* Reset cycle — this category's current start/end date range */}
+        {/* The shared date filter's currently selected window */}
         <div className="text-xs whitespace-nowrap text-muted-foreground sm:w-28 sm:shrink-0">
-          {formatPeriodRange(period)}
+          {formatRangeLabel(mode, range)}
         </div>
 
         {/* Category name + overspend indicator */}
@@ -74,7 +75,7 @@ export function BudgetEnvelopeRow({
             </p>
           )}
           <Progress
-            value={progressPercent(spent, monthlyTarget)}
+            value={progressPercent(spent, target)}
             className={cn(
               overBudget && '[&_[data-slot=progress-indicator]]:bg-destructive'
             )}
@@ -89,7 +90,7 @@ export function BudgetEnvelopeRow({
           )}
         >
           ${formatCurrency(spent)} / $
-          {monthlyTarget.toLocaleString(undefined, { maximumFractionDigits: 0 })}
+          {target.toLocaleString(undefined, { maximumFractionDigits: 0 })}
         </div>
 
         <ChevronDown
@@ -100,9 +101,7 @@ export function BudgetEnvelopeRow({
         />
       </button>
 
-      {isExpanded && (
-        <CategoryPurchases category={category} referenceDate={referenceDate} />
-      )}
+      {isExpanded && <CategoryPurchases category={category} range={range} />}
     </div>
   )
 }

@@ -1,6 +1,7 @@
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { cn, formatCurrency } from '@/lib/utils'
 import { getCategorySpent } from '@/lib/purchases'
+import type { DateFilterMode, DateRange } from '@/lib/period'
 import type { BudgetCategory, ChartColorToken } from '@/types/budget'
 import type { Purchase } from '@/types/purchase'
 
@@ -18,49 +19,57 @@ const segmentColorClass: Record<ChartColorToken, string> = {
   'chart-5': 'bg-category-5',
 }
 
-export type BudgetMetric = 'income' | 'monthlyBudgeted' | 'yearlyBudgeted'
-
-const metricLabel: Record<BudgetMetric, string> = {
-  income: '% of monthly income',
-  monthlyBudgeted: '% of total monthly budget',
-  yearlyBudgeted: '% of total yearly budget',
-}
+// 'income'/'primary' both measure against the selected window's own totals
+// (a month or a year, whichever the shared filter is set to); 'secondary'
+// measures against the complementary granularity — an annual projection
+// while viewing a month, a monthly average while viewing a whole year (see
+// BudgetSummary, which computes these and owns the mode-aware labels).
+export type BudgetMetric = 'income' | 'primary' | 'secondary'
 
 interface CategoryBreakdownBarProps {
   categories: BudgetCategory[]
   purchases: Purchase[]
-  referenceDate: Date
+  range: DateRange
+  mode: DateFilterMode
   metric: BudgetMetric
-  monthlyIncome: number
-  monthlyBudgeted: number
-  yearlyBudgeted: number
-  monthlySpent: number
-  yearlySpent: number
+  metricLabel: string
+  windowIncome: number
+  windowBudgeted: number
+  secondaryBudgeted: number
+  windowSpent: number
+  secondarySpent: number
 }
 
 export function CategoryBreakdownBar({
   categories,
   purchases,
-  referenceDate,
+  range,
+  mode,
   metric,
-  monthlyIncome,
-  monthlyBudgeted,
-  yearlyBudgeted,
-  monthlySpent,
-  yearlySpent,
+  metricLabel,
+  windowIncome,
+  windowBudgeted,
+  secondaryBudgeted,
+  windowSpent,
+  secondarySpent,
 }: CategoryBreakdownBarProps) {
   const total =
     metric === 'income'
-      ? monthlyIncome
-      : metric === 'monthlyBudgeted'
-        ? monthlyBudgeted
-        : yearlyBudgeted
-  const spentAmount = metric === 'yearlyBudgeted' ? yearlySpent : monthlySpent
+      ? windowIncome
+      : metric === 'primary'
+        ? windowBudgeted
+        : secondaryBudgeted
+  const spentAmount = metric === 'secondary' ? secondarySpent : windowSpent
 
   const breakdown = categories
     .map((category) => {
-      const monthlySpent = getCategorySpent(purchases, category, referenceDate)
-      const amount = metric === 'yearlyBudgeted' ? monthlySpent * 12 : monthlySpent
+      const categorySpent = getCategorySpent(purchases, category, range)
+      const amount =
+        metric === 'secondary'
+          ? mode === 'month'
+            ? categorySpent * 12
+            : categorySpent / 12
+          : categorySpent
       const percent = total > 0 ? (amount / total) * 100 : 0
       return { category, amount, percent }
     })
@@ -73,7 +82,7 @@ export function CategoryBreakdownBar({
     <Card>
       <CardHeader>
         <CardTitle className="text-sm font-medium text-muted-foreground">
-          Category breakdown — {metricLabel[metric]}
+          Category breakdown — {metricLabel}
         </CardTitle>
       </CardHeader>
       <CardContent className="space-y-4">

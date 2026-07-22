@@ -3,6 +3,7 @@ import { ChevronDown } from 'lucide-react'
 import { Progress } from '@/components/ui/progress'
 import { cn, formatCurrency } from '@/lib/utils'
 import { IncomeSourcePaychecks } from '@/components/income/IncomeSourcePaychecks'
+import type { DateRange } from '@/lib/period'
 import type { IncomeSource } from '@/types/incomeSource'
 import type { ChartColorToken } from '@/types/budget'
 
@@ -16,16 +17,16 @@ const colorClass: Record<ChartColorToken, string> = {
 
 interface IncomeSourceRowProps {
   source: IncomeSource
-  monthlyAmount: number
+  windowAmount: number
   percentOfIncome: number
-  referenceDate: Date
+  range: DateRange
 }
 
 export function IncomeSourceRow({
   source,
-  monthlyAmount,
+  windowAmount,
   percentOfIncome,
-  referenceDate,
+  range,
 }: IncomeSourceRowProps) {
   const [isExpanded, setIsExpanded] = useState(false)
   const Icon = source.icon
@@ -48,7 +49,7 @@ export function IncomeSourceRow({
         </div>
 
         <div className="text-sm whitespace-nowrap text-muted-foreground sm:w-40 sm:shrink-0 sm:text-right">
-          ${formatCurrency(monthlyAmount)}{' '}
+          ${formatCurrency(windowAmount)}{' '}
           <span className="text-xs">
             ({percentOfIncome > 0 ? `${percentOfIncome.toFixed(1)}%` : '—'})
           </span>
@@ -62,9 +63,7 @@ export function IncomeSourceRow({
         />
       </button>
 
-      {isExpanded && (
-        <IncomeSourcePaychecks source={source} referenceDate={referenceDate} />
-      )}
+      {isExpanded && <IncomeSourcePaychecks source={source} range={range} />}
     </div>
   )
 }

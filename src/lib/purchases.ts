@@ -1,34 +1,30 @@
-import { getCurrentPeriod } from './period'
+import { isDateInRange, type DateRange } from './period'
 import type { Purchase } from '@/types/purchase'
 import type { BudgetCategory } from '@/types/budget'
 
-// This category's purchases that fall within its cycle containing
-// `reference` (defaults to now — the live current cycle), most recent
-// first. ISO "YYYY-MM-DD" strings compare correctly with plain </>
-// operators (zero-padded, big-endian), so no Date parsing is needed for
-// the range check.
+// This category's purchases dated within the selected range, most recent
+// first. Filters directly against the shared date-range filter rather than
+// each category's own resetDay cycle — the range filter now governs which
+// purchases count for every screen, category rows included (resetDay
+// still drives each category's recurring dollar target — see
+// getTargetForRange in src/lib/budget.ts — it just no longer decides which
+// purchases get summed).
 export function getCategoryPurchases(
   purchases: Purchase[],
   category: BudgetCategory,
-  reference: Date = new Date()
+  range: DateRange
 ): Purchase[] {
-  const period = getCurrentPeriod(category.resetDay, reference)
   return purchases
-    .filter(
-      (p) =>
-        p.categoryId === category.id &&
-        p.date >= period.start &&
-        p.date <= period.end
-    )
+    .filter((p) => p.categoryId === category.id && isDateInRange(p.date, range))
     .sort((a, b) => (a.date < b.date ? 1 : -1))
 }
 
 export function getCategorySpent(
   purchases: Purchase[],
   category: BudgetCategory,
-  reference: Date = new Date()
+  range: DateRange
 ): number {
-  return getCategoryPurchases(purchases, category, reference).reduce(
+  return getCategoryPurchases(purchases, category, range).reduce(
     (sum, p) => sum + p.amount,
     0
   )

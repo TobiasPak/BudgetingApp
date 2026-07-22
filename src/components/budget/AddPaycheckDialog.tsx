@@ -26,13 +26,13 @@ import {
   addPaycheckWithSourceSchema,
   type AddPaycheckWithSourceInput,
 } from '@/lib/schemas/income'
-import { defaultDateForReference } from '@/lib/period'
+import { defaultDateForRange, type DateRange } from '@/lib/period'
 
 interface AddPaycheckDialogProps {
-  referenceDate: Date
+  range: DateRange
 }
 
-export function AddPaycheckDialog({ referenceDate }: AddPaycheckDialogProps) {
+export function AddPaycheckDialog({ range }: AddPaycheckDialogProps) {
   const [open, setOpen] = useState(false)
   const incomeSources = useBudgetStore((state) => state.incomeSources)
   const addPaycheck = useBudgetStore((state) => state.addPaycheck)
@@ -46,7 +46,7 @@ export function AddPaycheckDialog({ referenceDate }: AddPaycheckDialogProps) {
   } = useForm<AddPaycheckWithSourceInput>({
     resolver: zodResolver(addPaycheckWithSourceSchema),
     defaultValues: {
-      date: defaultDateForReference(referenceDate),
+      date: defaultDateForRange(range),
       sourceId: incomeSources[0]?.id,
     },
   })
@@ -54,7 +54,7 @@ export function AddPaycheckDialog({ referenceDate }: AddPaycheckDialogProps) {
   function onSubmit(data: AddPaycheckWithSourceInput) {
     addPaycheck(data)
     reset({
-      date: defaultDateForReference(referenceDate),
+      date: defaultDateForRange(range),
       sourceId: incomeSources[0]?.id,
     })
     setOpen(false)
@@ -95,7 +95,7 @@ export function AddPaycheckDialog({ referenceDate }: AddPaycheckDialogProps) {
             <Input
               id="date"
               type="date"
-              defaultValue={defaultDateForReference(referenceDate)}
+              defaultValue={defaultDateForRange(range)}
               {...register('date')}
             />
             {errors.date && (

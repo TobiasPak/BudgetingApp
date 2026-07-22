@@ -4,11 +4,9 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Button } from '@/components/ui/button'
 import { useBudgetStore } from '@/stores/useBudgetStore'
-import {
-  getCurrentMonthPaychecks,
-  getMonthlyIncome,
-  getYearlyProjectedIncome,
-} from '@/lib/income'
+import { getIncomeInRange, getPaychecksInRange } from '@/lib/income'
+import { annualize, formatRangeLabel, type DateFilterMode, type DateRange } from '@/lib/period'
+import { formatCurrency } from '@/lib/utils'
 import { AddPaycheckDialog } from '@/components/budget/AddPaycheckDialog'
 
 // Same reasoning as isInMonth in src/lib/income.ts: build the display date
@@ -22,29 +20,37 @@ function formatPaycheckDate(dateStr: string) {
   })
 }
 
-const monthLabelFormatter = new Intl.DateTimeFormat(undefined, {
-  month: 'long',
-  year: 'numeric',
-})
-
 interface IncomeOverviewProps {
-  referenceDate: Date
+  mode: DateFilterMode
+  range: DateRange
 }
 
-export function IncomeOverview({ referenceDate }: IncomeOverviewProps) {
+export function IncomeOverview({ mode, range }: IncomeOverviewProps) {
   const paychecks = useBudgetStore((state) => state.paychecks)
   const bankBalance = useBudgetStore((state) => state.bankBalance)
   const setBankBalance = useBudgetStore((state) => state.setBankBalance)
   const removePaycheck = useBudgetStore((state) => state.removePaycheck)
 
   const today = new Date()
-  const isCurrentMonth =
-    referenceDate.getFullYear() === today.getFullYear() &&
-    referenceDate.getMonth() === today.getMonth()
+  const isCurrentWindow =
+    mode === 'month'
+      ? range.start.getFullYear() === today.getFullYear() &&
+        range.start.getMonth() === today.getMonth()
+      : range.start.getFullYear() === today.getFullYear()
 
-  const monthlyIncome = getMonthlyIncome(paychecks, referenceDate)
-  const yearlyProjected = getYearlyProjectedIncome(monthlyIncome)
-  const thisMonthPaychecks = getCurrentMonthPaychecks(paychecks, referenceDate)
+  const windowIncome = getIncomeInRange(paychecks, range)
+  // Complementary granularity, mirroring BudgetSummary: an annual projection
+  // while viewing a month, a monthly average while viewing a whole year.
+  const secondaryLabel = mode === 'month' ? 'Projected this year' : 'Monthly average'
+  const secondaryValue =
+    mode === 'month' ? annualize(windowIncome, mode) : annualize(windowIncome, mode) / 12
+  const rangePaychecks = getPaychecksInRange(paychecks, range)
+
+  const earnedLabel = isCurrentWindow
+    ? mode === 'month'
+      ? 'Earned this month'
+      : 'Earned this year'
+    : `Earned in ${formatRangeLabel(mode, range)}`
 
   return (
     <Card>
@@ -52,25 +58,17 @@ export function IncomeOverview({ referenceDate }: IncomeOverviewProps) {
         <CardTitle className="text-sm font-medium text-muted-foreground">
           Income
         </CardTitle>
-        <AddPaycheckDialog referenceDate={referenceDate} />
+        <AddPaycheckDialog range={range} />
       </CardHeader>
       <CardContent className="space-y-4">
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
           <div>
-            <p className="text-xs text-muted-foreground">
-              {isCurrentMonth
-                ? 'Earned this month'
-                : `Earned in ${monthLabelFormatter.format(referenceDate)}`}
-            </p>
-            <p className="text-3xl font-bold">
-              ${monthlyIncome.toLocaleString()}
-            </p>
+            <p className="text-xs text-muted-foreground">{earnedLabel}</p>
+            <p className="text-3xl font-bold">${formatCurrency(windowIncome)}</p>
           </div>
           <div>
-            <p className="text-xs text-muted-foreground">Projected this year</p>
-            <p className="text-xl font-semibold">
-              ${yearlyProjected.toLocaleString()}
-            </p>
+            <p className="text-xs text-muted-foreground">{secondaryLabel}</p>
+            <p className="text-xl font-semibold">${formatCurrency(secondaryValue)}</p>
           </div>
           <div className="space-y-1">
             <Label htmlFor="bankBalance" className="text-xs text-muted-foreground">
@@ -87,9 +85,9 @@ export function IncomeOverview({ referenceDate }: IncomeOverviewProps) {
           </div>
         </div>
 
-        {thisMonthPaychecks.length > 0 && (
+        {rangePaychecks.length > 0 && (
           <div className="space-y-1 border-t pt-3">
-            {thisMonthPaychecks.map((paycheck) => (
+            {rangePaychecks.map((paycheck) => (
               <div
                 key={paycheck.id}
                 className="flex items-center justify-between text-sm"

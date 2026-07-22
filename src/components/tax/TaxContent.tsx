@@ -1,7 +1,7 @@
 import { TriangleAlert } from 'lucide-react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { useBudgetStore } from '@/stores/useBudgetStore'
-import { useDateFilterStore } from '@/stores/useDateFilterStore'
+import { useDateFilterStore, useDateFilterRange } from '@/stores/useDateFilterStore'
 import { getAnnualizedIncomeByType } from '@/lib/income'
 import { calculateFederalTax } from '@/lib/tax/federal'
 import { calculateCaliforniaTax } from '@/lib/tax/california'
@@ -28,21 +28,24 @@ function LineItem({ label, value, emphasis }: LineItemProps) {
 }
 
 // Now shares the app-wide date filter (useDateFilterStore) — browsing to a
-// past month changes which month's income gets annualized and which year's
-// quarterly due dates are shown. It does NOT change which tax brackets
-// apply: FEDERAL_BRACKETS_2026/CA_BRACKETS_2025 are fixed constants with no
-// multi-year lookup, so the disclaimer states those years literally rather
-// than deriving them from referenceDate — deriving them would falsely
-// imply the rates themselves change when browsing to a different year.
+// different month or year changes which window's income gets annualized
+// and which year's quarterly due dates are shown. It does NOT change which
+// tax brackets apply: FEDERAL_BRACKETS_2026/CA_BRACKETS_2025 are fixed
+// constants with no multi-year lookup, so the disclaimer states those years
+// literally rather than deriving them from the filter — deriving them
+// would falsely imply the rates themselves change when browsing to a
+// different year.
 export function TaxContent() {
   const paychecks = useBudgetStore((state) => state.paychecks)
   const incomeSources = useBudgetStore((state) => state.incomeSources)
-  const referenceDate = useDateFilterStore((state) => state.referenceDate)
+  const mode = useDateFilterStore((state) => state.mode)
+  const range = useDateFilterRange()
 
   const { w2, selfEmployed } = getAnnualizedIncomeByType(
     paychecks,
     incomeSources,
-    referenceDate
+    mode,
+    range
   )
   const federal = calculateFederalTax({
     w2Income: w2,
@@ -59,7 +62,7 @@ export function TaxContent() {
       federalTotal: federal.totalFederalTax,
       californiaTotal: california.totalCaliforniaTax,
     },
-    referenceDate.getFullYear()
+    range.start.getFullYear()
   )
 
   return (

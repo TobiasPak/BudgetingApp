@@ -3,15 +3,16 @@ import { BudgetSummary } from '@/components/budget/BudgetSummary'
 import { IncomeOverview } from '@/components/budget/IncomeOverview'
 import { AddBudgetDialog } from '@/components/budget/AddBudgetDialog'
 import { useBudgetStore } from '@/stores/useBudgetStore'
-import { useDateFilterStore } from '@/stores/useDateFilterStore'
+import { useDateFilterStore, useDateFilterRange } from '@/stores/useDateFilterStore'
+import { getTargetForMode } from '@/lib/budget'
 import {
   getAveragePaycheckAmount,
-  getMonthlyIncome,
+  getMonthlyIncomeEquivalent,
   getMonthlyTarget,
 } from '@/lib/income'
 
-// Reads referenceDate from the shared useDateFilterStore rather than
-// owning its own state — this mounts independently (once as the standalone
+// Reads mode/range from the shared useDateFilterStore rather than owning
+// its own state — this mounts independently (once as the standalone
 // BudgetPage, once inside a dashboard tab), but both now deliberately share
 // the same date filter rather than navigating independently.
 export function BudgetContent() {
@@ -19,17 +20,18 @@ export function BudgetContent() {
   const paychecks = useBudgetStore((state) => state.paychecks)
   const paychecksPerMonth = useBudgetStore((state) => state.paychecksPerMonth)
 
-  const referenceDate = useDateFilterStore((state) => state.referenceDate)
+  const mode = useDateFilterStore((state) => state.mode)
+  const range = useDateFilterRange()
 
-  const monthlyIncome = getMonthlyIncome(paychecks, referenceDate)
+  const monthlyIncome = getMonthlyIncomeEquivalent(paychecks, mode, range)
   const averagePaycheckAmount = getAveragePaycheckAmount(paychecks)
   const targetContext = { monthlyIncome, averagePaycheckAmount, paychecksPerMonth }
 
   return (
     <>
-      <IncomeOverview referenceDate={referenceDate} />
+      <IncomeOverview mode={mode} range={range} />
 
-      <BudgetSummary referenceDate={referenceDate} />
+      <BudgetSummary mode={mode} range={range} />
 
       <div className="flex items-center justify-between">
         <h2 className="text-lg font-medium">Categories</h2>
@@ -41,8 +43,9 @@ export function BudgetContent() {
           <BudgetEnvelopeRow
             key={category.id}
             category={category}
-            monthlyTarget={getMonthlyTarget(category, targetContext)}
-            referenceDate={referenceDate}
+            target={getTargetForMode(getMonthlyTarget(category, targetContext), mode)}
+            mode={mode}
+            range={range}
           />
         ))}
       </div>

@@ -4,7 +4,9 @@ import { getFirebaseAuth } from '@/lib/firebase'
 import { attachListeners } from '@/lib/firestore/sync'
 import {
   writeCategory,
+  deleteCategory,
   writeIncomeSource,
+  deleteIncomeSource,
   writePaycheck,
   deletePaycheck,
   writePurchase,
@@ -39,7 +41,9 @@ interface BudgetState {
   loading: boolean
   error: string | null
   addCategory: (category: FirestoreCategoryDoc) => void
+  removeCategory: (id: string) => void
   addIncomeSource: (source: FirestoreIncomeSourceDoc) => void
+  removeIncomeSource: (id: string) => void
   addPaycheck: (paycheck: FirestorePaycheckDoc) => void
   removePaycheck: (id: string) => void
   addPurchase: (purchase: FirestorePurchaseDoc) => void
@@ -96,11 +100,23 @@ export const useBudgetStore = create<BudgetState>((set) => ({
     if (!uid) return
     writeCategory(uid, category).catch((e) => reportWriteError('add category', e))
   },
+  removeCategory: (id) => {
+    const uid = requireUid()
+    if (!uid) return
+    deleteCategory(uid, id).catch((e) => reportWriteError('delete category', e))
+  },
   addIncomeSource: (source) => {
     const uid = requireUid()
     if (!uid) return
     writeIncomeSource(uid, source).catch((e) =>
       reportWriteError('add income source', e)
+    )
+  },
+  removeIncomeSource: (id) => {
+    const uid = requireUid()
+    if (!uid) return
+    deleteIncomeSource(uid, id).catch((e) =>
+      reportWriteError('delete income source', e)
     )
   },
   addPaycheck: (paycheck) => {

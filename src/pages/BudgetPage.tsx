@@ -1,13 +1,9 @@
 import { Link } from 'react-router-dom'
 import { Button } from '@/components/ui/button'
-import { MonthYearPicker } from '@/components/budget/MonthYearPicker'
+import { DateFilterTabs } from '@/components/budget/DateFilterTabs'
 import { BudgetContent } from '@/components/budget/BudgetContent'
-import { useDateFilterStore } from '@/stores/useDateFilterStore'
 
 export default function BudgetPage() {
-  const referenceDate = useDateFilterStore((state) => state.referenceDate)
-  const setReferenceDate = useDateFilterStore((state) => state.setReferenceDate)
-
   return (
     <main className="mx-auto flex max-w-4xl flex-col gap-6 px-4 py-8">
       <div className="flex items-center justify-between">
@@ -17,7 +13,7 @@ export default function BudgetPage() {
         </Button>
       </div>
 
-      <MonthYearPicker value={referenceDate} onChange={setReferenceDate} />
+      <DateFilterTabs />
 
       <BudgetContent />
     </main>

@@ -44,7 +44,7 @@ what the installed create-vite version ships.
 
 ## Current Status
 
-**Budget envelopes + revamped tabbed dashboard home + income tracking (W-2/contracted/self-employed classification) + a single shared month/year filter driving every tab and standalone route + real Firebase Auth/Firestore persistence (now split into staging + production environments) + federal/California tax estimate + Firestore audit timestamps on every record. Plaid still not started.**
+**Budget envelopes (with delete) + revamped tabbed dashboard home + income tracking (W-2/contracted/self-employed classification, with delete) + a single shared month/year date filter (bookmark-style tabs, not a popover) driving every tab and standalone route + real Firebase Auth/Firestore persistence (staging + production environments, now with Firebase App Check/reCAPTCHA v3 wired in Unenforced mode) + federal/California tax estimate + Firestore audit timestamps on every record. Plaid still not started.**
 
 Implemented:
 - Project scaffold (Vite + React 18 + TypeScript), clean `npm install`
@@ -91,26 +91,19 @@ Implemented:
   it (`CategoryPurchases`) showing that category's purchase list (with
   remove buttons) plus a small React Hook Form + Zod "add purchase" form
   (date, description, amount)
-- **Month/year ledger navigation** (`/budget`): a `MonthYearPicker`
-  (prev/next arrow buttons + a clickable month/year label opening a
-  popover with month/year `Select` dropdowns, plus a "Back to current"
-  link when viewing a past month) lets the whole Budget page "time
-  travel" to a past month and see that month's ledger — paychecks,
-  category spend, and reset-cycle date ranges all recompute for the
-  viewed month instead of always showing the current one. Implemented by
-  threading an optional `reference: Date = new Date()` parameter through
-  every derived-value helper (`getCategoryPurchases`/`getCategorySpent`
-  in `src/lib/purchases.ts`, `getCurrentPeriod` in `src/lib/period.ts`,
-  `getMonthlyIncome`/`getCurrentMonthPaychecks` in `src/lib/income.ts`),
-  defaulting to "now" so every pre-existing call site keeps working
-  unchanged. `BudgetPage` holds the selected `referenceDate` as state and
-  passes it down to `IncomeOverview`, `BudgetSummary`, `BudgetEnvelopeRow`,
-  `AddPaycheckDialog`, and `CategoryPurchases`. Scoped to the Budget page
-  only — the dashboard's live panels keep always showing the current
-  month. Categories themselves and `bankBalance` are **not** versioned —
+- **Month/year ledger navigation**: the whole app can "time travel" to a
+  past month or year and see that period's ledger — paychecks, category
+  spend/targets, and income all recompute for the viewed window instead of
+  always showing the current one. Implemented by threading a `range:
+  DateRange` (and, where a target/projection needs to scale, `mode:
+  DateFilterMode`) parameter through every derived-value helper
+  (`getCategoryPurchases`/`getCategorySpent` in `src/lib/purchases.ts`,
+  `getIncomeInRange`/`getPaychecksInRange` in `src/lib/income.ts`) — see
+  the "Single shared date filter" bullet below for the picker/store
+  itself. Categories themselves and `bankBalance` are **not** versioned —
   they're "current state," not part of the historical ledger; only
   paychecks/purchases (both already timestamped) are filtered by the
-  viewed month
+  viewed window
 - **Budget summary panels + category breakdown bar** (`/budget`):
   `BudgetSummary` renders 3 clickable stat cards ("Monthly Spent /
   Income", "Monthly Spent / Total Budgeted", "Yearly Spent / Total
@@ -125,17 +118,15 @@ Implemented:
   period. Segment/legend colors use new dedicated `--category-1..5`
   tokens (see Architecture) rather than the grayscale `--chart-1..5`
   tokens used for category icons elsewhere
-- **Recurring reset cycles**: every category has a `resetDay` (1–31) and
-  recurs monthly on that day rather than always the calendar month — e.g.
-  resetDay 15 means the category's current cycle is "the 15th of last
-  month" through "the 14th of this month" once you're past the 15th, or
-  the prior month's 15th–14th before it. Each row shows its current
-  cycle's start–end date (`src/lib/period.ts`, `getCurrentPeriod`).
-  Because spending is derived from purchases filtered to the current
-  cycle, a rollover "resets" spending for free — a purchase dated outside
-  the new cycle just stops counting, no stored total to zero out (this
-  replaced an earlier `periodStart`/`checkPeriodResets` polling mechanism
-  that's no longer needed — see Session Log)
+- **Recurring reset cycles (superseded)**: categories originally had a
+  `resetDay` (1–31) recurring monthly cycle independent of the calendar
+  month; this has since been superseded by the global shared date filter
+  (see "Single shared date filter" below), which now governs every
+  category's window directly — `resetDay` is kept on the type/form but no
+  longer drives which purchases count. Because spending is derived from
+  purchases filtered to the selected window (never stored), a filter
+  change "resets" spending for free — a purchase dated outside the
+  selected window just stops counting, no stored total to zero out
 - **Dashboard home revamp** (`/`): replaced the old 3-column
   donut+4-panels layout with a top `MoneySummaryRow` (one wide card, 3
   segments: Income this month, Spent this month + % of income, Left over
@@ -338,14 +329,36 @@ Implemented:
 - **Single shared date filter** (`src/stores/useDateFilterStore.ts`):
   reverses the earlier "each tab/route owns its own independent
   `referenceDate`" design — deliberately, per explicit user request, so
-  browsing to a past month anywhere (any dashboard tab, `MoneySummaryRow`,
-  or any of the 4 standalone routes) is reflected everywhere else too.
-  `MonthYearPicker` itself is unchanged; it's rendered once per page
-  (never inside a `*Content` component anymore) and every render reads/
-  writes the same store. `MoneySummaryRow` no longer always shows "now" —
-  its labels read "in <Month> <Year>" while browsing history, "this
-  month" otherwise (`formatMonthYear` in `src/lib/period.ts`). `TaxContent`
-  gained a date dimension for the first time
+  browsing to a different month/year anywhere (any dashboard tab,
+  `MoneySummaryRow`, or any of the 4 standalone routes) is reflected
+  everywhere else too. Rendered once per page via `DateFilterTabs`
+  (`src/components/budget/DateFilterTabs.tsx`) — a bookmark-style tab
+  strip (a clickable year label + prev/next arrows to browse which year's
+  tabs are shown, with 12 month tabs underneath), not a popover/dropdown.
+  The store holds `mode: 'month' | 'year'` plus `startDate`/`endDate`
+  (a `DateRange`) rather than a single `referenceDate` — clicking a month
+  tab sets a calendar-month range, clicking the year label sets a
+  calendar-year range; both are exact, unprorated windows (no "custom"
+  arbitrary range exists — considered and deliberately dropped in favor of
+  keeping month/year as the only two, always-easy options). Every
+  category's spend is now filtered directly by this shared range rather
+  than each category's own recurring reset cycle —
+  `BudgetCategory.resetDay` is kept on the type/form (in case a future
+  per-category-cycle view is reintroduced) but no longer decides which
+  purchases count toward a category, per explicit user choice (confirmed
+  via `AskUserQuestion`: "range wins" over "categories keep their own
+  cycle"). `annualize(amountInRange, mode)` (`src/lib/period.ts`) is the one shared
+  function every screen's "yearly"/"monthly average" figure goes through:
+  exact ×12 for month mode, the range's own total as-is for year mode
+  (nothing to project, since a year-mode range already covers the whole
+  year) — replacing what used to be ad hoc `monthlySpent * 12` scattered
+  across `BudgetSummary`/`SpendingPieChart`/`IncomeSourcesPieChart`/etc.
+  `getTargetForMode` (`src/lib/budget.ts`) applies the same exact-scaling
+  rule to a category's dollar target. `MoneySummaryRow` no longer always
+  shows "now" — its labels read "in <label>" while browsing away from the
+  current window, "this month"/"this year" otherwise (`formatRangeLabel`
+  in `src/lib/period.ts`). `TaxContent` gained a date dimension for the
+  first time
 - **Firestore audit timestamps**: every document in the 4 synced
   collections (categories, incomeSources, paychecks, purchases) now
   carries `createdAt`/`updatedAt`, set via Firestore's `serverTimestamp()`
@@ -381,11 +394,12 @@ src/
                     # page-body used by both BudgetPage and the dashboard's Budget
                     # tab; BudgetEnvelopeRow, BudgetSummary, IncomeOverview,
                     # AddBudgetDialog, AddPaycheckDialog, CategoryPurchases — the
-                    # expand-on-click purchase log/add form, MonthYearPicker —
-                    # prev/next + popover month/year selector, reads/writes the
-                    # single shared useDateFilterStore rather than local state —
-                    # rendered once per page (HomePage, and each of the 4
-                    # standalone routes), never inside a *Content component
+                    # expand-on-click purchase log/add form, DateFilterTabs — a
+                    # bookmark-style tab strip (clickable year label + prev/next
+                    # arrows to browse years, 12 month tabs underneath), reads/
+                    # writes the single shared useDateFilterStore rather than
+                    # local state — rendered once per page (HomePage, and each of
+                    # the 4 standalone routes), never inside a *Content component
                     # itself, so every page/tab shows the same selected date;
                     # CategoryBreakdownBar — stacked bar + legend driven by
                     # BudgetSummary's 3 clickable
@@ -432,9 +446,12 @@ src/
                     # synced, see below; useAuthStore.ts — user/status/error +
                     # sign-in/up/out actions, module-level onAuthStateChanged
                     # listener drives useBudgetStore's sync; useDateFilterStore.ts
-                    # — the single shared referenceDate/setReferenceDate every
-                    # page reads/writes, pure in-memory UI state, deliberately
-                    # NOT Firestore-synced and NOT folded into useBudgetStore)
+                    # — the single shared mode ('month' | 'year') + startDate/
+                    # endDate every page reads/writes (setToMonth/setToYear),
+                    # pure in-memory UI state, deliberately NOT Firestore-synced
+                    # and NOT folded into useBudgetStore; also exports
+                    # useDateFilterRange(), a memoized {start, end} selector safe
+                    # to use in effect/memo dependency arrays)
   lib/
     firebase.ts    # Firebase SDK init: `app`, `db` eager; `getFirebaseAuth()` lazy
                     # (getAuth() throws eagerly on missing/invalid API key, unlike
@@ -468,7 +485,14 @@ src/
                     # + deletePaycheck/deletePurchase/writeUserFields — every
                     # Firestore write useBudgetStore's actions delegate to.
                     # Each create function injects createdAt/updatedAt via
-                    # serverTimestamp() itself; no caller ever supplies these
+                    # serverTimestamp() itself; no caller ever supplies these.
+                    # deleteCategory/deleteIncomeSource cascade: each queries
+                    # (getDocs + where) every purchase/paycheck pointing at
+                    # that category/source id and deletes them alongside the
+                    # category/source doc in one writeBatch, so deleting a
+                    # category or income source never leaves orphaned
+                    # purchase/paycheck records behind pointing at an id that
+                    # no longer exists
       users.ts      # ensureUserDoc(uid) — idempotent setDoc(...,{merge:true}),
                     # called on every sign-in so it never clobbers existing
                     # bankBalance/paychecksPerMonth
@@ -491,33 +515,49 @@ src/
     utils.ts       # shadcn cn() helper, formatCurrency() (always 2 decimals —
                     # needed anywhere a value sums user-entered purchase amounts)
     budget.ts      # derived budget helpers (isOverBudget, progressPercent) — take
-                    # plain `spent`/`monthlyTarget` numbers, not a category object
-    income.ts      # derived income helpers (getMonthlyIncome, getYearlyProjectedIncome,
-                    # getAveragePaycheckAmount, getMonthlyTarget — resolves a
-                    # BudgetCategory's dollar target from income context;
-                    # getSourcePaychecks/getSourceMonthlyIncome — a single
-                    # IncomeSource's paychecks/total for a given month;
-                    # getLeftoverCash — monthlyIncome minus getTotalSpent, the
-                    # dashboard's "money left over" figure, deliberately named and
-                    # kept distinct from the unrelated "remaining budget"
+                    # plain `spent`/`target` numbers, not a category object;
+                    # getTargetForMode(monthlyTarget, mode) — scales a category's
+                    # monthly-rate target to the shared filter's mode (exact for
+                    # 'month', ×12 for 'year')
+    income.ts      # derived income helpers (getIncomeInRange/getPaychecksInRange —
+                    # replaced the old always-"this month" getMonthlyIncome/
+                    # getCurrentMonthPaychecks with range-based versions;
+                    # getMonthlyIncomeEquivalent — the implied MONTHLY rate for
+                    # whatever the filter is set to, what getMonthlyTarget's
+                    # percentage-of-income categories resolve against regardless
+                    # of mode; getAveragePaycheckAmount, getMonthlyTarget —
+                    # resolves a BudgetCategory's dollar target from income
+                    # context; getSourcePaychecks/getSourceIncomeInRange — a
+                    # single IncomeSource's paychecks/total for the selected
+                    # range; getLeftoverCash — range income minus getTotalSpent,
+                    # the dashboard's "money left over" figure, deliberately named
+                    # and kept distinct from the unrelated "remaining budget"
                     # (budgeted-minus-spent) concept used on the Budget tab;
-                    # getAnnualizedIncomeByType — this month's income annualized
-                    # and split by each source's incomeType into {w2,
-                    # selfEmployed}, the one integration point src/lib/tax/ uses)
+                    # getAnnualizedIncomeByType — the selected range's income
+                    # annualized via `annualize` and split by each source's
+                    # incomeType into {w2, selfEmployed}, the one integration
+                    # point src/lib/tax/ uses)
     purchases.ts   # derived spending helpers (getCategoryPurchases, getCategorySpent) —
                     # a category's spend is summed from Purchase records filtered to
-                    # its current period, never stored directly
+                    # the shared date filter's selected range, never stored directly
     spending.ts    # getTotalSpent — sums getCategorySpent across every category for
                     # a total-spend view; no new state, just a different lens on the
                     # same Purchase records purchases.ts already derives from
-    period.ts      # recurring reset-cycle date math (getCurrentPeriod,
-                    # formatPeriodRange) — a category's resetDay (1-31) maps to
-                    # a current start/end date range; day-clamped for short months.
-                    # Also defaultDateForReference — the shared "default form date
-                    # for whichever month is currently being viewed" helper used by
-                    # both AddPaycheckDialog and CategoryPurchases; formatMonthYear
-                    # — "July 2026" formatting shared by MonthYearPicker's trigger
-                    # label and MoneySummaryRow's "in <Month> <Year>" wording
+    period.ts      # DateRange ({start, end}), DateFilterMode ('month' | 'year'),
+                    # isDateInRange, monthBounds/yearBounds — the shared date
+                    # filter's core date math. annualize(amountInRange, mode) —
+                    # the one shared "project this window onto a full year"
+                    # function every screen's yearly/monthly-average figure goes
+                    # through (×12 for month mode, as-is for year mode, since a
+                    # year-mode range already covers the whole year); superseded
+                    # the old resetDay-cycle math (getCurrentPeriod,
+                    # formatPeriodRange — deleted, no longer used now that the
+                    # global filter governs every category's window directly).
+                    # Also defaultDateForRange — the shared "default form date
+                    # for whatever's currently selected" helper used by both
+                    # AddPaycheckDialog and CategoryPurchases; formatMonthYear/
+                    # formatRangeLabel — "July 2026" / "2026" formatting shared
+                    # by DateFilterTabs and MoneySummaryRow's "in <label>" wording
     schemas/
       budget.ts    # Zod schemas: addBudgetSchema, addPaycheckSchema, addPurchaseSchema
       income.ts    # addIncomeSourceSchema — includes required incomeType ('w2' |
@@ -1903,3 +1943,230 @@ unique findings, not the standard checklist.
   **not** been deployed to either the staging or production Firebase
   project yet — per the user's own standing instruction, that's a
   separate explicit confirmation still to be asked for.
+
+### 2026-07-22 — Firebase App Check (reCAPTCHA v3)
+- User asked how to set up App Check, then — after a long back-and-forth
+  answering pure setup questions (creating a reCAPTCHA v3 account, what a
+  "Label" is, what domain to register, site key vs. secret key, one
+  registration per project vs. shared) — explicitly said to wire it into
+  the actual app code once both staging and production had a site key
+  registered (the user reused the **same** site key, registered against
+  "localhost", for both environments — reasonable since a reCAPTCHA site
+  key isn't tied to a single Firebase project, and neither environment has
+  a real public domain yet).
+- `src/lib/firebase.ts`: `initializeAppCheck`/`ReCaptchaV3Provider`, gated
+  behind `if (recaptchaSiteKey)` so `.env.local` (emulator-first dev,
+  deliberately left with no key) cleanly no-ops — the emulators don't
+  check App Check and there's nothing real to protect there. Added
+  `VITE_FIREBASE_RECAPTCHA_SITE_KEY?` (optional) to `src/vite-env.d.ts`
+  and documented it in `.env.example`.
+- Verified the site key was actually picked up per-environment (not just
+  assumed from the file-naming convention) using the same
+  build-then-grep-the-bundle method already established in this file for
+  the staging/production project-ID split: ran `vite build --mode staging`
+  and `--mode production` into throwaway output directories, grepped each
+  bundle for the literal site key string (found in both, as expected since
+  it's shared), and confirmed a **default** (`.env.local`) build contains
+  zero App Check code at all (`initializeAppCheck`/`ReCaptchaV3Provider`
+  don't appear), proving the `if (recaptchaSiteKey)` guard actually
+  no-ops rather than just looking like it should. Deleted the throwaway
+  builds afterward.
+- Both projects are left in Firebase Console's **Unenforced** (monitor-only)
+  mode — App Check attaches tokens and Console shows verified-vs-
+  unverified request metrics, but nothing is actually rejected yet.
+  Explained to the user (separately, not itself an action taken) why this
+  matters before flipping to Enforce: unlike Unenforced, Enforce applies
+  immediately to all traffic including the user's own signed-in sessions,
+  so it's worth watching the Console metrics for a healthy verified rate
+  first, rather than flipping blind.
+- Committed this session's accumulated work (App Check + the shared date
+  filter + Firestore audit timestamps + the `CLAUDE.md` cleanup, none of
+  which had been committed yet) as a single commit — confirmed via
+  `git diff` on `package.json`/`.gitignore`/`.firebaserc` that everything
+  staged was expected before committing, since those three specifically
+  had unrelated-looking prior-session changes (the staging/prod npm
+  scripts and `.env.staging`/`.env.production` gitignore entries) that
+  needed a sanity check before bundling them into the same commit.
+
+### 2026-07-22 — Date filter redesigned: month/year bookmark tabs (not a popover)
+- User asked, in the same session as the shared date filter above, to
+  layer in "a start/end date filter" with easy month/year shortcuts on
+  top of what had just been built — before any code was written, this
+  surfaced a real design fork (does a custom range override each
+  category's own resetDay cycle? does the picker stay a popover, or
+  become something else?), so both were resolved via `AskUserQuestion`
+  first: category cycles → "range wins, targets prorated"; picker shape →
+  a calendar popover with click-two-dates range selection. Implementation
+  of that design got partway through (added the `calendar` shadcn
+  component, `react-day-picker`/`date-fns`, a `DateRange`/`daysInRange`/
+  `annualize`-with-proration model in `src/lib/period.ts`) before the user
+  interrupted mid-build with a **different, simpler design**: bookmark-
+  style month tabs across the top, a year label above them (also
+  clickable, to filter by the whole year) with prev/next arrows to browse
+  which year's tabs are shown — and, asked directly via `AskUserQuestion`,
+  confirmed custom start/end ranges should be **dropped entirely** in
+  favor of just month/year. This simplified `DateFilterMode` back down to
+  `'month' | 'year'` only (no `'custom'` case ever shipped) and made the
+  whole proration question moot — `annualize`/`getTargetForMode` only ever
+  branch on two exact cases (×12 for month, as-is for year), no day-count
+  math anywhere. Uninstalled `react-day-picker`/`date-fns` and deleted the
+  unused `calendar.tsx` before they ever got wired into anything, rather
+  than leaving speculative dead code from the abandoned first design.
+- Built `DateFilterTabs.tsx` (`components/budget/`, replacing
+  `MonthYearPicker.tsx` outright) — self-contained, reads/writes
+  `useDateFilterStore` directly with no props, unlike the old picker's
+  `value`/`onChange` pattern; eliminates the identical
+  `useDateFilterStore` + `<MonthYearPicker value=... onChange=.../>`
+  boilerplate that used to be repeated at all 5 render sites
+  (`HomePage` + 4 standalone page wrappers). A local `displayedYear`
+  (independent from the committed filter) lets the prev/next arrows
+  browse which year's 12 month tabs are shown without themselves changing
+  the filter — only clicking a month tab or the year label commits a
+  selection, mirroring the old picker's "navigate vs. select" split.
+- Reworked `useDateFilterStore` around `mode: 'month' | 'year'` +
+  `startDate`/`endDate` (a `DateRange`) instead of a single
+  `referenceDate`, with `setToMonth`/`setToYear` actions (`monthBounds`/
+  `yearBounds` in `src/lib/period.ts` compute the calendar bounds). Added
+  `useDateFilterRange()`, a `useMemo`-wrapped `{start, end}` selector —
+  needed because naively returning a fresh object from a plain selector
+  broke every `useEffect`/`useMemo` downstream that depended on the range
+  (e.g. `CategoryPurchases`'s re-default-date-on-navigate effect), since a
+  new object identity on every render defeats a dependency-array
+  comparison even when the underlying dates haven't actually changed.
+- Rewrote every consumer that used to take a `referenceDate: Date` prop to
+  instead take `range: DateRange` (+ `mode: DateFilterMode` wherever a
+  target/projection needs to scale): `BudgetContent`/`BudgetSummary`/
+  `BudgetEnvelopeRow`/`CategoryBreakdownBar`/`IncomeOverview`/
+  `CategoryPurchases`/`AddPaycheckDialog` (Budget), `IncomeContent`/
+  `IncomeSummary`/`IncomeSourceRow`/`IncomeSourcePaychecks`/
+  `IncomeSourcesPieChart` (Income), `SpendingContent`/`SpendingSummary`/
+  `SpendingPieChart` (Spending), `TaxContent`, `MoneySummaryRow`. Each
+  screen's paired "current window" + "other granularity" card (e.g.
+  Budget's 3rd card, Income's "Projected This Year", Spending's "Yearly
+  Spent") now flips which granularity is the "current" one and which is
+  the projection depending on `mode` — viewing a month shows the window's
+  actual total plus a ×12 annual projection (unchanged from before this
+  session); viewing a whole year shows the window's actual (real, not
+  projected) annual total plus a ÷12 monthly average instead, avoiding a
+  3rd card that would otherwise just repeat the 2nd card's number.
+- **Found and fixed a real bug during verification, not just a redesign
+  quirk**: `useDateFilterStore`'s `setToMonth`/`setToYear` spread
+  `monthBounds(date)`/`yearBounds(date)` (which return `{start, end}`)
+  directly into `set()`, but the store's actual fields are named
+  `startDate`/`endDate` — so `set({ mode: 'month', ...monthBounds(date) })`
+  silently added stray, unused `start`/`end` keys to the store's state and
+  **never updated `startDate`/`endDate` at all**. `tsc` didn't catch this
+  because TypeScript's excess-property check doesn't reliably cover
+  properties introduced via object spread the way it does for literal
+  properties. Symptom: `mode` correctly flipped (e.g. clicking the year
+  label visibly highlighted it), but every actual figure kept showing
+  whatever month the store had mounted with — including, misleadingly,
+  when testing "year mode" against demo data that's entirely dated in one
+  month, where the bug's wrong numbers happened to coincidentally match
+  the right ones. Caught by testing an actually-empty month (June, no
+  demo data) and seeing $6,980 still displayed instead of $0. Fixed by
+  destructuring explicitly: `const { start, end } = monthBounds(date);
+  set({ mode: 'month', startDate: start, endDate: end })`.
+- Also found and fixed a real formatting bug this redesign exposed:
+  `IncomeOverview`'s "Projected this year"/"Monthly average" figures used
+  `.toLocaleString()` (no fixed decimals) instead of the app's established
+  `formatCurrency()` — harmless before, since `monthlyIncome × 12` from
+  whole-dollar paychecks usually stayed a clean number, but year mode's
+  new ÷12 division (e.g. `$6,980 / 12 = $581.6666...`) exposed it as a
+  real display bug (`$581.667` instead of `$581.67`).
+- Extracted per-screen `metricLabel` strings (e.g. "% of monthly income",
+  "% of yearly spending") into an explicit `Record<Metric, string>` built
+  by each Summary component, rather than deriving them by lowercasing a
+  card's own display label (`${cardLabel.toLowerCase()}`) — the derived
+  version produced grammatically awkward strings once card labels started
+  varying by mode ("% of earned this month", "% of monthly average"
+  instead of "% of monthly income", "% of monthly average spending").
+- **Long dead-end chasing what looked like a dark-mode CSS bug**: the
+  active month tab's `bg-background`/`bg-card` utility class rendered as
+  solid white in dark mode via `getComputedStyle`, even after ruling out
+  transition-timing artifacts, cascade-layer specificity, and stale-HMR
+  state (confirmed via a genuinely fresh tab and full reload). Eventually
+  found the **exact same** wrong-white result on a pre-existing,
+  already-shipped button (`SignOutButton`) checked the identical way —
+  proving it isn't anything this session's code introduced, and is
+  either a real latent app-wide dark-mode issue or an artifact specific
+  to querying computed styles through this browser tooling, neither of
+  which is this feature's to fix. Left `DateFilterTabs`' active-tab class
+  as `bg-card`/`text-card-foreground` (a deliberate choice over
+  `bg-background` — it visually matches the Card-based content the active
+  tab introduces) and moved on rather than continuing to chase a
+  pre-existing, out-of-scope issue.
+- Verified end-to-end via the dev server (see `clearbooks-verify` skill):
+  `tsc -b`/`lint`/`build` all clean; clicking each month tab correctly
+  scopes income/spend/targets to that calendar month (confirmed against
+  an empty month, not just the one month all demo data happens to live
+  in); clicking the year label correctly switches to real annual totals
+  (not a ×12 projection) with quarterly Tax due dates keyed to that year;
+  `CategoryPurchases`' re-default-on-navigate fix confirmed working with
+  the new memoized range (expanded Groceries, switched to June, watched
+  its date field and purchase list both correctly clear); the standalone
+  `/budget` route renders identically to the dashboard's Budget tab. All
+  clean aside from the flagged, out-of-scope dark-mode oddity above.
+- Two small follow-up requests in the same session: repositioned
+  `DateFilterTabs` so the year is a 13th tab sharing the exact same
+  bookmark styling as the 12 months (`‹ 2026 Jan Feb … Dec ›`, prev/next
+  arrows bookending the whole strip) instead of a visually distinct
+  control sitting in its own row above the months; then added a "jump to
+  today" icon button (`CalendarDays`, no visible label) right after the
+  next-year arrow, replacing the old below-strip "Back to current" text
+  link with an icon button in the row itself, shown only while browsing
+  away from the current month.
+
+### 2026-07-22 — Delete budget categories + income sources
+- User asked to be able to delete a budget category or income source,
+  with the delete control living inside the row's existing expand-on-click
+  panel (`CategoryPurchases`/`IncomeSourcePaychecks`) and a confirm/cancel
+  step before it actually happens — the same `AlertDialog` pattern already
+  used for "Load demo data."
+- The one real design decision: what happens to a category's/source's
+  purchases/paychecks when it's deleted. Rather than leaving them
+  orphaned (pointing at an id that no longer exists — technically
+  harmless since nothing would ever display them again, but silently
+  leaked data sitting in Firestore forever) or asking the user to move/
+  reassign them first, chose **cascading delete**: `deleteCategory`/
+  `deleteIncomeSource` (`src/lib/firestore/writes.ts`) each query every
+  purchase/paycheck pointing at that id (`getDocs` + `where(...)`) and
+  delete them alongside the category/source doc in one `writeBatch` — well
+  under the 500-op cap for a personal-scale dataset, mirroring the batch
+  pattern `demoData.ts` already established. This matches the plain
+  reading of "delete this category" (it and its history are gone, not
+  silently orphaned), and the confirm dialog's copy says so explicitly
+  ("every purchase ever logged under it — not just what's shown for the
+  currently selected month/year") so deleting a category while browsing a
+  past month doesn't read as if only that month's purchases are affected.
+- No `firestore.rules` changes needed — `allow read, delete: if
+  isOwner(userId)` already existed on all 4 collections from the original
+  rules rewrite.
+- Added `removeCategory`/`removeIncomeSource` to `useBudgetStore`,
+  mirroring the existing `removePaycheck`/`removePurchase` pattern
+  (`requireUid()` guard, delegate to the writes.ts function, `.catch` →
+  `reportWriteError`). Added the delete button + `AlertDialog` to the
+  bottom of `CategoryPurchases`/`IncomeSourcePaychecks`, below the add-form
+  and separated by a `border-t` — deliberately not at the top of the
+  panel, so the destructive action isn't the first thing seen when
+  expanding a row; `variant="destructive"` on both the trigger and the
+  dialog's confirm button.
+- Verified end-to-end via the dev server: expanded "Hobbies" (Budget),
+  clicked Delete → Cancel (confirmed it survived, dialog closed via
+  `data-state="closed"`), then Delete → Delete (confirmed the category and
+  its budgeted-total contribution both disappeared — Total Budgeted
+  dropped by exactly $100/mo, $1,200/yr, matching Hobbies' fixed target
+  exactly). Repeated for "DoorDash" (Income, a source with $0 paychecks
+  logged) — confirmed it disappeared from the Sources list. `tsc -b`/
+  `lint`/`build` all clean.
+- **Tooling note, not an app bug**: raw `element.click()` via the browser
+  automation tooling intermittently failed to register on this app's
+  plain (non-Radix) `<button>` elements — e.g. a category row's own
+  expand/collapse toggle — even after waiting past any transition
+  duration, while the exact same `.click()` approach worked reliably
+  moments later on a different element. The `computer` tool's simulated
+  mouse click was more consistently reliable when raw `.click()` didn't
+  register; when it also failed, retrying the identical `.click()` call
+  a second time worked. Not investigated further — flagged here in case
+  it recurs, consistent with this file's existing note about occasional
+  automation-tool click flakiness.

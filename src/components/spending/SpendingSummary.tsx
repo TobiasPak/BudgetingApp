@@ -3,13 +3,15 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { cn, formatCurrency } from '@/lib/utils'
 import { useBudgetStore } from '@/stores/useBudgetStore'
 import { getTotalSpent } from '@/lib/spending'
+import { annualize, type DateFilterMode, type DateRange } from '@/lib/period'
 import {
   SpendingPieChart,
   type SpendingMetric,
 } from '@/components/spending/SpendingPieChart'
 
 interface SpendingSummaryProps {
-  referenceDate: Date
+  mode: DateFilterMode
+  range: DateRange
 }
 
 // Same selectable-card-drives-chart-below pattern as BudgetSummary/
@@ -22,14 +24,27 @@ function selectableCardClass(isSelected: boolean): string {
   )
 }
 
-export function SpendingSummary({ referenceDate }: SpendingSummaryProps) {
+export function SpendingSummary({ mode, range }: SpendingSummaryProps) {
   const categories = useBudgetStore((state) => state.categories)
   const purchases = useBudgetStore((state) => state.purchases)
 
-  const [selectedMetric, setSelectedMetric] = useState<SpendingMetric>('monthly')
+  const [selectedMetric, setSelectedMetric] = useState<SpendingMetric>('window')
 
-  const monthlySpent = getTotalSpent(categories, purchases, referenceDate)
-  const yearlySpent = monthlySpent * 12
+  const windowSpent = getTotalSpent(categories, purchases, range)
+  // Complementary granularity, same pattern as BudgetSummary/IncomeSummary:
+  // an annual projection while viewing a month, a monthly average while
+  // viewing a whole year.
+  const secondarySpent =
+    mode === 'month' ? annualize(windowSpent, mode) : annualize(windowSpent, mode) / 12
+
+  const windowLabel = mode === 'month' ? 'Monthly Spent' : 'Yearly Spent'
+  const secondaryLabel = mode === 'month' ? 'Yearly Spent' : 'Monthly Average'
+
+  const metricLabel: Record<SpendingMetric, string> = {
+    window: mode === 'month' ? '% of monthly spending' : '% of yearly spending',
+    secondary:
+      mode === 'month' ? '% of yearly spending' : '% of monthly average spending',
+  }
 
   return (
     <div className="space-y-3">
@@ -37,43 +52,43 @@ export function SpendingSummary({ referenceDate }: SpendingSummaryProps) {
         <Card
           role="button"
           tabIndex={0}
-          onClick={() => setSelectedMetric('monthly')}
+          onClick={() => setSelectedMetric('window')}
           onKeyDown={(e) => {
             if (e.key === 'Enter' || e.key === ' ') {
               e.preventDefault()
-              setSelectedMetric('monthly')
+              setSelectedMetric('window')
             }
           }}
-          className={selectableCardClass(selectedMetric === 'monthly')}
+          className={selectableCardClass(selectedMetric === 'window')}
         >
           <CardHeader>
             <CardTitle className="text-sm font-medium text-muted-foreground">
-              Monthly Spent
+              {windowLabel}
             </CardTitle>
           </CardHeader>
           <CardContent>
-            <p className="text-2xl font-semibold">${formatCurrency(monthlySpent)}</p>
+            <p className="text-2xl font-semibold">${formatCurrency(windowSpent)}</p>
           </CardContent>
         </Card>
         <Card
           role="button"
           tabIndex={0}
-          onClick={() => setSelectedMetric('yearly')}
+          onClick={() => setSelectedMetric('secondary')}
           onKeyDown={(e) => {
             if (e.key === 'Enter' || e.key === ' ') {
               e.preventDefault()
-              setSelectedMetric('yearly')
+              setSelectedMetric('secondary')
             }
           }}
-          className={selectableCardClass(selectedMetric === 'yearly')}
+          className={selectableCardClass(selectedMetric === 'secondary')}
         >
           <CardHeader>
             <CardTitle className="text-sm font-medium text-muted-foreground">
-              Yearly Spent
+              {secondaryLabel}
             </CardTitle>
           </CardHeader>
           <CardContent>
-            <p className="text-2xl font-semibold">${formatCurrency(yearlySpent)}</p>
+            <p className="text-2xl font-semibold">${formatCurrency(secondarySpent)}</p>
           </CardContent>
         </Card>
       </div>
@@ -81,10 +96,12 @@ export function SpendingSummary({ referenceDate }: SpendingSummaryProps) {
       <SpendingPieChart
         categories={categories}
         purchases={purchases}
-        referenceDate={referenceDate}
+        range={range}
+        mode={mode}
         metric={selectedMetric}
-        monthlySpent={monthlySpent}
-        yearlySpent={yearlySpent}
+        metricLabel={metricLabel[selectedMetric]}
+        windowSpent={windowSpent}
+        secondarySpent={secondarySpent}
       />
     </div>
   )

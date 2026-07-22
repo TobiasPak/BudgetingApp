@@ -2,6 +2,7 @@ import { Cell, Pie, PieChart, ResponsiveContainer, Tooltip } from 'recharts'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { formatCurrency } from '@/lib/utils'
 import { getCategorySpent } from '@/lib/purchases'
+import type { DateFilterMode, DateRange } from '@/lib/period'
 import type { BudgetCategory, ChartColorToken } from '@/types/budget'
 import type { Purchase } from '@/types/purchase'
 
@@ -17,36 +18,45 @@ const segmentColor: Record<ChartColorToken, string> = {
   'chart-5': 'var(--color-category-5)',
 }
 
-export type SpendingMetric = 'monthly' | 'yearly'
-
-const metricLabel: Record<SpendingMetric, string> = {
-  monthly: '% of monthly spending',
-  yearly: '% of yearly spending',
-}
+// 'window' measures against the selected window's own total spend (a month
+// or a year, whichever the shared filter is set to); 'secondary' measures
+// against the complementary granularity — an annual projection while
+// viewing a month, a monthly average while viewing a whole year (see
+// SpendingSummary, which computes these and owns the mode-aware labels).
+export type SpendingMetric = 'window' | 'secondary'
 
 interface SpendingPieChartProps {
   categories: BudgetCategory[]
   purchases: Purchase[]
-  referenceDate: Date
+  range: DateRange
+  mode: DateFilterMode
   metric: SpendingMetric
-  monthlySpent: number
-  yearlySpent: number
+  metricLabel: string
+  windowSpent: number
+  secondarySpent: number
 }
 
 export function SpendingPieChart({
   categories,
   purchases,
-  referenceDate,
+  range,
+  mode,
   metric,
-  monthlySpent,
-  yearlySpent,
+  metricLabel,
+  windowSpent,
+  secondarySpent,
 }: SpendingPieChartProps) {
-  const total = metric === 'yearly' ? yearlySpent : monthlySpent
+  const total = metric === 'secondary' ? secondarySpent : windowSpent
 
   const breakdown = categories
     .map((category) => {
-      const spentThisPeriod = getCategorySpent(purchases, category, referenceDate)
-      const amount = metric === 'yearly' ? spentThisPeriod * 12 : spentThisPeriod
+      const categorySpent = getCategorySpent(purchases, category, range)
+      const amount =
+        metric === 'secondary'
+          ? mode === 'month'
+            ? categorySpent * 12
+            : categorySpent / 12
+          : categorySpent
       const percent = total > 0 ? (amount / total) * 100 : 0
       return { category, name: category.name, amount, percent }
     })
@@ -59,7 +69,7 @@ export function SpendingPieChart({
     <Card>
       <CardHeader>
         <CardTitle className="text-sm font-medium text-muted-foreground">
-          Spending breakdown — {metricLabel[metric]}
+          Spending breakdown — {metricLabel}
         </CardTitle>
       </CardHeader>
       <CardContent>

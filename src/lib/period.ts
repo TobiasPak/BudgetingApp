@@ -1,6 +1,15 @@
-export interface Period {
-  start: string // ISO date "YYYY-MM-DD" — first day of the current cycle
-  end: string // ISO date "YYYY-MM-DD" — last day of the current cycle (day before next reset)
+// How the shared date filter (useDateFilterStore) is currently set — a
+// whole calendar month, or a whole calendar year. Drives whether "yearly"
+// figures are the range's own total (year) or need projecting via ×12
+// (month) — see `annualize` below.
+export type DateFilterMode = 'month' | 'year'
+
+// The shared filter's selected window — both ends inclusive, local dates
+// (not UTC), matching this file's existing "compare Y/M/D components, never
+// new Date(isoString)" convention throughout.
+export interface DateRange {
+  start: Date
+  end: Date
 }
 
 function pad(n: number): string {
@@ -11,75 +20,50 @@ function formatIsoDate(year: number, month: number, day: number): string {
   return `${year}-${pad(month)}-${pad(day)}`
 }
 
-// Not every month has a 31st (or 30th, for Feb) — clamp the requested reset
-// day down to whatever the last real day of that month is, so a reset day
-// of 31 becomes Feb 28/29 instead of overflowing into March.
-function clampDayToMonth(year: number, month: number, day: number): number {
-  const lastDayOfMonth = new Date(year, month, 0).getDate()
-  return Math.min(day, lastDayOfMonth)
+function toIsoDate(date: Date): string {
+  return formatIsoDate(date.getFullYear(), date.getMonth() + 1, date.getDate())
 }
 
-// Computes the currently-active recurring monthly cycle for a category with
-// the given reset day. E.g. resetDay=5, reference=July 20 → cycle runs
-// July 5 through August 4 (the day before the next reset).
-export function getCurrentPeriod(
-  resetDay: number,
-  reference: Date = new Date()
-): Period {
-  const year = reference.getFullYear()
-  const month = reference.getMonth() + 1 // 1-indexed, matches clampDayToMonth
-  const day = reference.getDate()
+// ISO "YYYY-MM-DD" strings compare correctly with plain </> operators
+// (zero-padded, big-endian) — no Date parsing needed for the range check,
+// same reasoning as the rest of this file.
+export function isDateInRange(dateStr: string, range: DateRange): boolean {
+  return dateStr >= toIsoDate(range.start) && dateStr <= toIsoDate(range.end)
+}
 
-  let startYear = year
-  let startMonth = month
-  // If today is before this month's reset day, the cycle we're currently in
-  // actually started last month.
-  if (day < clampDayToMonth(year, month, resetDay)) {
-    startMonth -= 1
-    if (startMonth === 0) {
-      startMonth = 12
-      startYear -= 1
-    }
+export function monthBounds(date: Date): DateRange {
+  return {
+    start: new Date(date.getFullYear(), date.getMonth(), 1),
+    end: new Date(date.getFullYear(), date.getMonth() + 1, 0),
   }
-  const startDay = clampDayToMonth(startYear, startMonth, resetDay)
-  const start = formatIsoDate(startYear, startMonth, startDay)
+}
 
-  let endMonth = startMonth + 1
-  let endYear = startYear
-  if (endMonth === 13) {
-    endMonth = 1
-    endYear += 1
+export function yearBounds(date: Date): DateRange {
+  return {
+    start: new Date(date.getFullYear(), 0, 1),
+    end: new Date(date.getFullYear(), 11, 31),
   }
-  const nextResetDay = clampDayToMonth(endYear, endMonth, resetDay)
-  const endDateObj = new Date(endYear, endMonth - 1, nextResetDay)
-  endDateObj.setDate(endDateObj.getDate() - 1)
-  const end = formatIsoDate(
-    endDateObj.getFullYear(),
-    endDateObj.getMonth() + 1,
-    endDateObj.getDate()
-  )
-
-  return { start, end }
 }
 
-// Default date (ISO "YYYY-MM-DD") for a new record when the user is
-// looking at `referenceDate`'s month. Viewing the current month defaults
-// to today (unchanged prior behavior); viewing a past month defaults to
-// somewhere inside that month instead of always landing on today's date —
-// makes it quick to backfill a paycheck/purchase you forgot to log while
-// you're already looking at that period.
-export function defaultDateForReference(referenceDate: Date): string {
-  const today = new Date()
-  const isCurrentMonth =
-    referenceDate.getFullYear() === today.getFullYear() &&
-    referenceDate.getMonth() === today.getMonth()
-  const base = isCurrentMonth ? today : referenceDate
-  return formatIsoDate(base.getFullYear(), base.getMonth() + 1, base.getDate())
+// Projects an amount that fell within the selected window onto a full
+// year. 'month' scales it ×12 (unchanged prior behavior); 'year' returns it
+// as-is, since a year-mode range already covers the whole year — nothing to
+// project.
+export function annualize(amountInRange: number, mode: DateFilterMode): number {
+  return mode === 'month' ? amountInRange * 12 : amountInRange
 }
 
-// "July 2026" — shared by MonthYearPicker's trigger label and
-// MoneySummaryRow's "in <Month> <Year>" wording when browsing a past month,
-// so both stay in sync if the display format ever changes.
+// Default date (ISO "YYYY-MM-DD") for a new record when the user is looking
+// at `range`. Defaults to today if today falls within the selected range
+// (unchanged prior behavior for the common case); otherwise defaults to the
+// range's start — makes it quick to backfill a paycheck/purchase you forgot
+// to log while you're already looking at that period.
+export function defaultDateForRange(range: DateRange): string {
+  const todayIso = toIsoDate(new Date())
+  return isDateInRange(todayIso, range) ? todayIso : toIsoDate(range.start)
+}
+
+// "July 2026" — used for MoneySummaryRow's "in <Month> <Year>" wording.
 export function formatMonthYear(date: Date): string {
   const formatter = new Intl.DateTimeFormat(undefined, {
     month: 'long',
@@ -88,19 +72,12 @@ export function formatMonthYear(date: Date): string {
   return formatter.format(date)
 }
 
-// "Jul 5 – Aug 4" — parses the ISO string's own components rather than
-// `new Date(isoString)`, which parses as UTC midnight and can display as
-// the previous day in negative UTC-offset timezones.
-export function formatPeriodRange(period: Period): string {
-  const formatter = new Intl.DateTimeFormat(undefined, {
-    month: 'short',
-    day: 'numeric',
-  })
-  const toLocalDate = (iso: string) => {
-    const [y, m, d] = iso.split('-').map(Number)
-    return new Date(y, m - 1, d)
-  }
-  return `${formatter.format(toLocalDate(period.start))} – ${formatter.format(
-    toLocalDate(period.end)
-  )}`
+// "July 2026" (month mode) or "2026" (year mode) — the plain-language label
+// for whatever the shared filter is currently set to. Used anywhere a
+// screen needs to say what window it's showing: BudgetEnvelopeRow's date
+// column (replacing the old per-category resetDay cycle display, now that
+// the shared filter's range governs every category's spend — see
+// src/lib/purchases.ts) and MoneySummaryRow's "in <label>" wording.
+export function formatRangeLabel(mode: DateFilterMode, range: DateRange): string {
+  return mode === 'month' ? formatMonthYear(range.start) : String(range.start.getFullYear())
 }

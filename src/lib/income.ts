@@ -1,80 +1,62 @@
 import { getTotalSpent } from './spending'
+import { annualize, isDateInRange, type DateFilterMode, type DateRange } from './period'
 import type { Paycheck } from '@/types/paycheck'
 import type { BudgetCategory } from '@/types/budget'
 import type { Purchase } from '@/types/purchase'
 import type { IncomeSource } from '@/types/incomeSource'
 
-// `new Date("YYYY-MM-DD")` parses the string as UTC midnight, which can
-// display as the previous day in negative UTC-offset timezones. Comparing
-// the string's year/month directly sidesteps that entirely.
-function isInMonth(dateStr: string, reference: Date): boolean {
-  const [year, month] = dateStr.split('-').map(Number)
-  return year === reference.getFullYear() && month === reference.getMonth() + 1
-}
-
-export function getCurrentMonthPaychecks(
+export function getPaychecksInRange(
   paychecks: Paycheck[],
-  reference: Date = new Date()
+  range: DateRange
 ): Paycheck[] {
-  return paychecks.filter((paycheck) => isInMonth(paycheck.date, reference))
+  return paychecks.filter((paycheck) => isDateInRange(paycheck.date, range))
 }
 
-export function getMonthlyIncome(
-  paychecks: Paycheck[],
-  reference: Date = new Date()
-): number {
-  return getCurrentMonthPaychecks(paychecks, reference).reduce(
-    (sum, p) => sum + p.amount,
-    0
-  )
+export function getIncomeInRange(paychecks: Paycheck[], range: DateRange): number {
+  return getPaychecksInRange(paychecks, range).reduce((sum, p) => sum + p.amount, 0)
 }
 
-export function getYearlyProjectedIncome(monthlyIncome: number): number {
-  return monthlyIncome * 12
-}
-
-// Actual cash leftover from this month's earnings after spending — distinct
-// from a category's "remaining budget" (budgeted minus spent), which is a
-// different concept scoped to the Budget domain, not income.
+// Actual cash leftover from the selected range's earnings after spending —
+// distinct from a category's "remaining budget" (budgeted minus spent),
+// which is a different concept scoped to the Budget domain, not income. No
+// annualizing here — both sides are already totals for the same window, so
+// there's nothing to project.
 export function getLeftoverCash(
   paychecks: Paycheck[],
   categories: BudgetCategory[],
   purchases: Purchase[],
-  reference: Date = new Date()
+  range: DateRange
 ): number {
-  return (
-    getMonthlyIncome(paychecks, reference) -
-    getTotalSpent(categories, purchases, reference)
-  )
+  return getIncomeInRange(paychecks, range) - getTotalSpent(categories, purchases, range)
 }
 
-// This source's paychecks within the month containing `reference`, most
-// recent first — same derived-not-stored pattern as getCategoryPurchases.
+// This source's paychecks within the selected range, most recent first —
+// same derived-not-stored pattern as getCategoryPurchases.
 export function getSourcePaychecks(
   paychecks: Paycheck[],
   sourceId: string,
-  reference: Date = new Date()
+  range: DateRange
 ): Paycheck[] {
-  return getCurrentMonthPaychecks(paychecks, reference)
+  return getPaychecksInRange(paychecks, range)
     .filter((p) => p.sourceId === sourceId)
     .sort((a, b) => (a.date < b.date ? 1 : -1))
 }
 
-export function getSourceMonthlyIncome(
+export function getSourceIncomeInRange(
   paychecks: Paycheck[],
   sourceId: string,
-  reference: Date = new Date()
+  range: DateRange
 ): number {
-  return getSourcePaychecks(paychecks, sourceId, reference).reduce(
+  return getSourcePaychecks(paychecks, sourceId, range).reduce(
     (sum, p) => sum + p.amount,
     0
   )
 }
 
-// Averaged over ALL paychecks ever logged, not just this month's — using
-// only this month's paychecks would give 0 early in the month (before any
-// paycheck has landed yet), which would zero out any "per paycheck"
-// percentage budget's projected target right when it's most useful.
+// Averaged over ALL paychecks ever logged, not just the selected range's —
+// using only the range's paychecks would give 0 for a range with nothing
+// logged yet, which would zero out any "per paycheck" percentage budget's
+// projected target right when it's most useful.
 export function getAveragePaycheckAmount(paychecks: Paycheck[]): number {
   if (paychecks.length === 0) return 0
   return paychecks.reduce((sum, p) => sum + p.amount, 0) / paychecks.length
@@ -86,37 +68,55 @@ interface MonthlyTargetContext {
   paychecksPerMonth: number
 }
 
+// The implied MONTHLY income rate for the selected range — what
+// getMonthlyTarget's percentage-of-income categories resolve against
+// regardless of whether the filter is set to a month or a year. Derived by
+// annualizing the range's actual income the same way
+// getAnnualizedIncomeByType does, then dividing back down to a monthly
+// rate: for 'month' mode this round-trips to exactly the range's own
+// income (unchanged prior behavior — (income × 12) ÷ 12 = income); for
+// 'year' mode it's that year's total income ÷ 12 (an average monthly rate).
+export function getMonthlyIncomeEquivalent(
+  paychecks: Paycheck[],
+  mode: DateFilterMode,
+  range: DateRange
+): number {
+  const incomeInRange = getIncomeInRange(paychecks, range)
+  return annualize(incomeInRange, mode) / 12
+}
+
 export interface AnnualizedIncomeByType {
   w2: number
   selfEmployed: number
 }
 
-// This month's income (same window as getMonthlyIncome), split by each
-// paycheck's source's incomeType and projected to a full year the same way
-// getYearlyProjectedIncome already does (× 12) — the single integration
-// point between the income model and src/lib/tax/, which only ever needs
-// these two annualized numbers, never raw paychecks. Both 'contracted' and
-// 'selfEmployed' sources land in the same `selfEmployed` bucket here —
-// federal/CA tax law doesn't distinguish a 1099 contractor from other
-// self-employment income (same SE tax, same QBI eligibility), so the
-// IncomeType split beyond 'w2' exists purely for clearer per-source
-// labeling, not a taxable difference (see src/types/incomeSource.ts). A
-// paycheck whose source can't be found at all (deleted source, or a
-// pre-incomeType source not yet resolved) falls into the same bucket via
-// this `else`, matching the same conservative fallback used when hydrating
-// a Firestore doc missing the field (src/lib/firestore/sync.ts) — better
-// to overcount potential SE tax than silently drop it from a liability
-// estimate.
+// Income within the selected range, split by each paycheck's source's
+// incomeType and projected to a full year via `annualize` (×12 for month
+// mode, as-is for year mode) — the single integration point between the
+// income model and src/lib/tax/, which only ever needs these two
+// annualized numbers, never raw paychecks. Both 'contracted' and
+// 'selfEmployed' sources land in the same
+// `selfEmployed` bucket here — federal/CA tax law doesn't distinguish a
+// 1099 contractor from other self-employment income (same SE tax, same QBI
+// eligibility), so the IncomeType split beyond 'w2' exists purely for
+// clearer per-source labeling, not a taxable difference (see
+// src/types/incomeSource.ts). A paycheck whose source can't be found at all
+// (deleted source, or a pre-incomeType source not yet resolved) falls into
+// the same bucket via this `else`, matching the same conservative fallback
+// used when hydrating a Firestore doc missing the field
+// (src/lib/firestore/sync.ts) — better to overcount potential SE tax than
+// silently drop it from a liability estimate.
 export function getAnnualizedIncomeByType(
   paychecks: Paycheck[],
   incomeSources: IncomeSource[],
-  reference: Date = new Date()
+  mode: DateFilterMode,
+  range: DateRange
 ): AnnualizedIncomeByType {
   const incomeTypeBySourceId = new Map(
     incomeSources.map((source) => [source.id, source.incomeType])
   )
 
-  const monthly = getCurrentMonthPaychecks(paychecks, reference).reduce(
+  const inRange = getPaychecksInRange(paychecks, range).reduce(
     (totals, paycheck) => {
       if (incomeTypeBySourceId.get(paycheck.sourceId) === 'w2') {
         totals.w2 += paycheck.amount
@@ -129,8 +129,8 @@ export function getAnnualizedIncomeByType(
   )
 
   return {
-    w2: getYearlyProjectedIncome(monthly.w2),
-    selfEmployed: getYearlyProjectedIncome(monthly.selfEmployed),
+    w2: annualize(inRange.w2, mode),
+    selfEmployed: annualize(inRange.selfEmployed, mode),
   }
 }
 

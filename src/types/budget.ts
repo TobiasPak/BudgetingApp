@@ -16,15 +16,22 @@ interface BudgetCategoryBase {
   icon: LucideIcon
   color: ChartColorToken
   isCustom?: boolean
-  // Day of month (1-31) this category's tracking cycle recurs on — see
-  // getCurrentPeriod in src/lib/period.ts. Defaults to 1 (calendar month).
+  // Day of month (1-31) this category was originally configured to recur
+  // on. Defaults to 1. No longer drives which purchases count toward this
+  // category's spend — since the shared date filter (useDateFilterStore)
+  // was introduced, that filter's own selected month/year governs every
+  // category's window directly (see getCategorySpent in
+  // src/lib/purchases.ts), so two categories with different resetDay
+  // values now show the same calendar window. Kept on the type/form rather
+  // than removed outright, in case a future per-category-cycle view is
+  // reintroduced.
   //
   // Spending itself isn't stored here at all — it's derived by summing
-  // this category's Purchase records that fall within its current period
-  // (see getCategorySpent in src/lib/purchases.ts). That also means a
-  // cycle rollover "resets" spending for free: once a purchase's date
-  // falls outside the newly-current period, it just stops counting — no
-  // stored total to manually zero out, unlike the old monthlySpent field.
+  // this category's Purchase records that fall within the selected window.
+  // That also means a filter change "resets" spending for free: once a
+  // purchase's date falls outside the newly-selected window, it just stops
+  // counting — no stored total to manually zero out, unlike the old
+  // monthlySpent field.
   resetDay: number
   // Server-assigned audit timestamps — when this category was actually
   // created/edited in Firestore, distinct from any user-entered date.

@@ -1,7 +1,8 @@
 import { Cell, Pie, PieChart, ResponsiveContainer, Tooltip } from 'recharts'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { formatCurrency } from '@/lib/utils'
-import { getSourceMonthlyIncome } from '@/lib/income'
+import { getSourceIncomeInRange } from '@/lib/income'
+import type { DateFilterMode, DateRange } from '@/lib/period'
 import type { ChartColorToken } from '@/types/budget'
 import type { IncomeSource } from '@/types/incomeSource'
 import type { Paycheck } from '@/types/paycheck'
@@ -18,42 +19,45 @@ const segmentColor: Record<ChartColorToken, string> = {
   'chart-5': 'var(--color-category-5)',
 }
 
-export type IncomeMetric = 'monthly' | 'yearly'
-
-const metricLabel: Record<IncomeMetric, string> = {
-  monthly: '% of monthly income',
-  yearly: '% of yearly projected income',
-}
+// 'window' measures against the selected window's own income total (a
+// month or a year, whichever the shared filter is set to); 'secondary'
+// measures against the complementary granularity — an annual projection
+// while viewing a month, a monthly average while viewing a whole year (see
+// IncomeSummary, which computes these and owns the mode-aware labels).
+export type IncomeMetric = 'window' | 'secondary'
 
 interface IncomeSourcesPieChartProps {
   sources: IncomeSource[]
   paychecks: Paycheck[]
-  referenceDate: Date
+  range: DateRange
+  mode: DateFilterMode
   metric: IncomeMetric
-  monthlyIncome: number
-  yearlyIncome: number
+  metricLabel: string
+  windowIncome: number
+  secondaryIncome: number
 }
 
 export function IncomeSourcesPieChart({
   sources,
   paychecks,
-  referenceDate,
+  range,
+  mode,
   metric,
-  monthlyIncome,
-  yearlyIncome,
+  metricLabel,
+  windowIncome,
+  secondaryIncome,
 }: IncomeSourcesPieChartProps) {
-  const total = metric === 'yearly' ? yearlyIncome : monthlyIncome
+  const total = metric === 'secondary' ? secondaryIncome : windowIncome
 
   const breakdown = sources
     .map((source) => {
-      const earnedThisPeriod = getSourceMonthlyIncome(
-        paychecks,
-        source.id,
-        referenceDate
-      )
-      // Yearly projection per source stays consistent with how yearly
-      // income overall is projected elsewhere (monthly × 12).
-      const amount = metric === 'yearly' ? earnedThisPeriod * 12 : earnedThisPeriod
+      const sourceIncome = getSourceIncomeInRange(paychecks, source.id, range)
+      const amount =
+        metric === 'secondary'
+          ? mode === 'month'
+            ? sourceIncome * 12
+            : sourceIncome / 12
+          : sourceIncome
       const percent = total > 0 ? (amount / total) * 100 : 0
       return { source, amount, percent }
     })
@@ -66,7 +70,7 @@ export function IncomeSourcesPieChart({
     <Card>
       <CardHeader>
         <CardTitle className="text-sm font-medium text-muted-foreground">
-          Income breakdown — {metricLabel[metric]}
+          Income breakdown — {metricLabel}
         </CardTitle>
       </CardHeader>
       <CardContent>
