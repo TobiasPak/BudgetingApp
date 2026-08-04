@@ -12,6 +12,8 @@ import {
   writePurchase,
   deletePurchase,
   writeUserFields,
+  categorizePlaidTransactionAsSpending,
+  categorizePlaidTransactionAsIncome,
 } from '@/lib/firestore/writes'
 import type {
   FirestoreCategoryDoc,
@@ -21,6 +23,7 @@ import type {
 } from '@/lib/firestore/types'
 import type { BudgetCategory } from '@/types/budget'
 import type { Paycheck } from '@/types/paycheck'
+import type { PlaidTransaction } from '@/types/plaidTransaction'
 import type { Purchase } from '@/types/purchase'
 import type { IncomeSource } from '@/types/incomeSource'
 import type { Unsubscribe } from 'firebase/firestore'
@@ -30,6 +33,7 @@ interface BudgetState {
   incomeSources: IncomeSource[]
   paychecks: Paycheck[]
   purchases: Purchase[]
+  plaidTransactions: PlaidTransaction[]
   bankBalance: number
   // How many paychecks you expect per month — used to project a monthly
   // dollar target for "percentage of paycheck" budgets even before all of
@@ -50,6 +54,19 @@ interface BudgetState {
   removePurchase: (id: string) => void
   setBankBalance: (amount: number) => void
   setPaychecksPerMonth: (count: number) => void
+  // Turns a raw, uncategorized bank transaction into a real Purchase/
+  // Paycheck — see categorizePlaidTransactionAsSpending/AsIncome in
+  // src/lib/firestore/writes.ts for what this actually does.
+  categorizeTransactionAsSpending: (
+    transactionId: string,
+    categoryId: string,
+    purchase: { date: string; description: string; amount: number }
+  ) => void
+  categorizeTransactionAsIncome: (
+    transactionId: string,
+    sourceId: string,
+    paycheck: { date: string; amount: number }
+  ) => void
   // Called only from useAuthStore's onAuthStateChanged listener — not meant
   // to be called directly by UI code.
   startSync: (uid: string) => void
@@ -61,6 +78,7 @@ const emptyState = {
   incomeSources: [] as IncomeSource[],
   paychecks: [] as Paycheck[],
   purchases: [] as Purchase[],
+  plaidTransactions: [] as PlaidTransaction[],
   bankBalance: 0,
   paychecksPerMonth: 2,
 }
@@ -153,6 +171,20 @@ export const useBudgetStore = create<BudgetState>((set) => ({
       reportWriteError('update paychecks per month', e)
     )
   },
+  categorizeTransactionAsSpending: (transactionId, categoryId, purchase) => {
+    const uid = requireUid()
+    if (!uid) return
+    categorizePlaidTransactionAsSpending(uid, transactionId, categoryId, purchase).catch(
+      (e) => reportWriteError('categorize transaction', e)
+    )
+  },
+  categorizeTransactionAsIncome: (transactionId, sourceId, paycheck) => {
+    const uid = requireUid()
+    if (!uid) return
+    categorizePlaidTransactionAsIncome(uid, transactionId, sourceId, paycheck).catch(
+      (e) => reportWriteError('categorize transaction', e)
+    )
+  },
 
   startSync: (uid) => {
     unsubscribers.forEach((unsub) => unsub())
@@ -162,6 +194,7 @@ export const useBudgetStore = create<BudgetState>((set) => ({
       onIncomeSources: (incomeSources) => set({ incomeSources }),
       onPaychecks: (paychecks) => set({ paychecks }),
       onPurchases: (purchases) => set({ purchases }),
+      onPlaidTransactions: (plaidTransactions) => set({ plaidTransactions }),
       onUserDoc: (data) =>
         set({
           bankBalance: data.bankBalance,

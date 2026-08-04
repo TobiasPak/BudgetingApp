@@ -87,6 +87,39 @@ service cloud.firestore {
           && request.resource.data.categoryId is string
           && request.resource.data.description is string;
       }
+
+      // Raw bank transactions synced from Plaid (not yet wired to a real
+      // Plaid connection — see functions/src/index.ts). Created by the
+      // "Simulate bank sync" demo action today; in real usage would be
+      // created by a Cloud Function via the Admin SDK, which bypasses these
+      // rules entirely, so `create` here only really governs client-side
+      // writes (the demo seed).
+      match /plaidTransactions/{transactionId} {
+        allow read, delete: if isOwner(userId);
+        allow create: if isOwner(userId)
+          && request.resource.data.accountName is string
+          && request.resource.data.amount is number && request.resource.data.amount > 0
+          && request.resource.data.date is string
+          && request.resource.data.merchantName is string
+          && request.resource.data.plaidCategory is string
+          && request.resource.data.transactionType in ['spending', 'income', 'transfer']
+          && request.resource.data.pending is bool
+          && hasValidTimestamps();
+        // The only update path today is categorization (see
+        // categorizePlaidTransactionAsSpending/AsIncome in
+        // src/lib/firestore/writes.ts) — assigns categoryId+purchaseId
+        // (spending) or sourceId+paycheckId (income) and bumps updatedAt.
+        // The fields synced from Plaid itself are immutable once created.
+        allow update: if isOwner(userId)
+          && request.resource.data.accountName == resource.data.accountName
+          && request.resource.data.amount == resource.data.amount
+          && request.resource.data.date == resource.data.date
+          && request.resource.data.merchantName == resource.data.merchantName
+          && request.resource.data.plaidCategory == resource.data.plaidCategory
+          && request.resource.data.transactionType == resource.data.transactionType
+          && request.resource.data.createdAt == resource.data.createdAt
+          && request.resource.data.updatedAt == request.time;
+      }
     }
   }
 }

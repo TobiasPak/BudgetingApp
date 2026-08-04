@@ -9,8 +9,16 @@ including hybrid users who combine several of these.
 
 Planned feature areas not yet built (budgeting, income tracking, and the
 federal/CA tax tracker are already built — see Current Status):
-- Bank connectivity via Plaid (12,000+ institutions, OAuth, auto-categorization,
-  recurring subscription detection)
+- Bank connectivity via Plaid (12,000+ institutions, OAuth, real-time sync,
+  recurring subscription detection) — the frontend/backend data model, UI,
+  and Cloud Functions scaffolding are prepped (see Current Status' Plaid
+  bullet), but the actual Plaid Link/OAuth flow and a real developer
+  sandbox account are still needed
+- AI-agent-based auto-categorization of synced bank transactions into
+  budget categories/income sources — same story: the categorization
+  write path and manual "Categorize…" UI exist and work today, but the
+  automatic AI agent trigger is a documented stub (functions/src/index.ts)
+  pending an API key + provider decision
 - OCR form upload for income documents (Veryfi)
 - Business expense tracking: personal/business split, Schedule C categories,
   receipt OCR, partial-deduction flagging (meals 50%, home office %, mixed-use)
@@ -30,7 +38,7 @@ federal/CA tax tracker are already built — see Current Status):
 | Charts | Recharts |
 | Backend | Firebase Cloud Functions (Node.js + TypeScript) |
 | Database & Auth | Firebase Firestore + Firebase Auth |
-| Bank connectivity | Plaid (not yet integrated) |
+| Bank connectivity | Plaid (data model/UI/Cloud Functions scaffolding prepped — see `src/types/plaidTransaction.ts`; real Plaid Link/OAuth connection not yet integrated) |
 | Receipt OCR | Veryfi (not yet integrated) |
 | Mileage | Manual entry + MileIQ import (not yet built) |
 | Email | Resend or SendGrid (not yet integrated) |
@@ -44,7 +52,7 @@ what the installed create-vite version ships.
 
 ## Current Status
 
-**Budget envelopes (with delete) + revamped tabbed dashboard home + income tracking (W-2/contracted/self-employed classification, with delete) + a single shared month/year date filter (bookmark-style tabs, not a popover) driving every tab and standalone route + real Firebase Auth/Firestore persistence (staging + production environments, now with Firebase App Check/reCAPTCHA v3 wired in Unenforced mode) + federal/California tax estimate + Firestore audit timestamps on every record. Plaid still not started.**
+**Budget envelopes (with delete) + revamped tabbed dashboard home + income tracking (W-2/contracted/self-employed classification, with delete) + a single shared month/year date filter (bookmark-style tabs, not a popover) driving every tab and standalone route + real Firebase Auth/Firestore persistence (staging + production environments, now with Firebase App Check/reCAPTCHA v3 wired in Unenforced mode) + federal/California tax estimate + Firestore audit timestamps on every record + Plaid integration prep (bank-transaction data model/UI/Cloud Functions scaffolding, with a "Simulate bank sync" demo action standing in for a real Plaid connection). Plaid/AI categorization credentials still not obtained — see the Plaid bullet below for exactly what is and isn't real yet.**
 
 Implemented:
 - Project scaffold (Vite + React 18 + TypeScript), clean `npm install`
@@ -369,13 +377,51 @@ Implemented:
   There's no update path for any of these 4 entities yet (every "add" is
   always a brand-new document), so `updatedAt` currently always equals
   `createdAt` — expected, not a bug. No UI surfaces these values yet
+- **Plaid integration prep (data model/UI/Cloud Functions scaffolding, not
+  a real connection yet)**: a new `PlaidTransaction` type
+  (`src/types/plaidTransaction.ts`) represents one raw bank transaction —
+  distinct from `Purchase`/`Paycheck`, which are this app's own categorized
+  ledger entries — with `transactionType: 'spending' | 'income' |
+  'transfer'`, Plaid's own category guess (informational only), a
+  `pending` flag, and optional `categoryId`/`purchaseId` (spending) or
+  `sourceId`/`paycheckId` (income) once categorized. Synced into a new
+  `users/{uid}/plaidTransactions` Firestore collection via the same
+  one-writer sync pattern as everything else (`useBudgetStore.
+  plaidTransactions`). **Categorizing a transaction creates a real
+  Purchase/Paycheck from it** (`categorizePlaidTransactionAsSpending`/
+  `AsIncome` in `src/lib/firestore/writes.ts`, one `writeBatch`: create the
+  new Purchase/Paycheck doc + mark the source transaction resolved) — so
+  it counts toward budget targets/income totals exactly like a manually-
+  added one, and `getCategorySpent`/`getIncomeInRange` needed zero changes
+  to pick it up, since they just query the same `purchases`/`paychecks`
+  collections either way. A new "Bank activity" card on both the Spending
+  tab (`SpendingBankActivity`) and Income tab (`IncomeBankActivity`) lists
+  transactions of the matching type within the shared date filter's range,
+  most-recent-first; an uncategorized transaction shows an inline
+  category/source `Select` (categorizing is a single action — no separate
+  confirm step) instead of a "categorized as X" badge. This manual
+  "Categorize…" control is what actually does the categorizing today —
+  there's no real Plaid connection or AI agent yet, so nothing arrives or
+  sorts itself automatically. A **"Simulate bank sync" button**
+  (`SimulateBankSyncButton`, mirroring `LoadDemoDataButton`'s AlertDialog-
+  confirmed, only-shown-when-empty pattern) seeds ~10 realistic,
+  deliberately all-uncategorized fake transactions
+  (`src/lib/plaidDemoData.ts`) so the whole logs → categorize → totals-
+  update flow is testable today. `functions/src/index.ts` has two real,
+  compiling (but unconnected) Cloud Function stubs — `plaidWebhook` (would
+  receive Plaid's transaction-sync webhook) and `categorizeTransaction`
+  (would fire on every new transaction and call an AI Agent API to assign
+  a category automatically) — both documented with exactly what's needed
+  to make them real: Plaid developer credentials + the `plaid` npm
+  package for the former, an AI Agent API key + provider decision for the
+  latter. Neither has been deployed or connected to anything.
 
 Not yet implemented: a running tax-reserve balance, itemized deductions/
-credits, filing statuses other than single, Plaid/Veryfi/Resend
-integrations (Plaid is the planned next backend session — needs a
-developer sandbox account with API keys, then real Cloud Functions for
-token exchange), dark-mode toggle (theme is class-based and CSS-ready,
-but nothing flips the `.dark` class yet).
+credits, filing statuses other than single, a real Plaid connection (OAuth/
+Link flow, developer sandbox credentials — see the Plaid bullet above for
+what's already prepped), a real AI categorization agent (same bullet),
+Veryfi/Resend integrations, dark-mode toggle (theme is class-based and
+CSS-ready, but nothing flips the `.dark` class yet).
 
 ## Architecture / Folder Conventions
 
@@ -409,7 +455,11 @@ src/
                     # Spending tab; SpendingSummary — 2 clickable metric cards
                     # driving SpendingPieChart below, same pattern as
                     # BudgetSummary/CategoryBreakdownBar; SpendingPieChart — first
-                    # real Recharts usage in the app, a donut + legend)
+                    # real Recharts usage in the app, a donut + legend;
+                    # SpendingBankActivity — "Bank activity" log of raw Plaid
+                    # transactions (transactionType 'spending' only), each
+                    # showing a category Select if uncategorized or a "categorized
+                    # as X" badge otherwise; see the Plaid bullet in Current Status)
     income/        # Income feature components (IncomeContent — the extracted
                     # page-body used by both IncomePage and the dashboard's Income
                     # tab; IncomeSummary — 2 clickable metric cards driving
@@ -417,7 +467,9 @@ src/
                     # IncomeSourceRow — log-row list item mirroring
                     # BudgetEnvelopeRow; IncomeSourcePaychecks — expand-on-click
                     # paycheck log/add form mirroring CategoryPurchases;
-                    # AddIncomeSourceDialog — mirrors AddBudgetDialog)
+                    # AddIncomeSourceDialog — mirrors AddBudgetDialog;
+                    # IncomeBankActivity — mirrors SpendingBankActivity for
+                    # transactionType 'income' transactions)
     tax/           # Tax feature components (TaxContent — the extracted page-body
                     # used by both TaxPage and the dashboard's Tax tab; no separate
                     # summary/row subcomponents like the other features since this
@@ -428,7 +480,9 @@ src/
                     # always-current-month income/spent/leftover row, owns
                     # `toneClasses`/`PanelTone` for icon tinting;
                     # LoadDemoDataButton — AlertDialog-confirmed, only shown
-                    # when all 4 collections are empty)
+                    # when all 4 collections are empty; SimulateBankSyncButton —
+                    # mirrors LoadDemoDataButton, seeds fake plaidTransactions,
+                    # only shown when that collection is empty)
     charts/        # Recharts wrapper components (still empty/future — not the
                     # same as SpendingPieChart, which is real Recharts but
                     # feature-specific so it lives in components/spending/ instead,
@@ -442,8 +496,10 @@ src/
                     # landing destination), sign-in/sign-up mode toggle
   stores/          # Zustand stores, one file per domain, named use<Domain>Store.ts
                     # (useBudgetStore.ts — categories, incomeSources, paychecks,
-                    # purchases, bankBalance, paychecksPerMonth, now Firestore-
-                    # synced, see below; useAuthStore.ts — user/status/error +
+                    # purchases, plaidTransactions, bankBalance, paychecksPerMonth,
+                    # now Firestore-synced, see below; categorizeTransactionAsSpending/
+                    # AsIncome — the store actions the Bank activity UI calls to
+                    # categorize a raw Plaid transaction; useAuthStore.ts — user/status/error +
                     # sign-in/up/out actions, module-level onAuthStateChanged
                     # listener drives useBudgetStore's sync; useDateFilterStore.ts
                     # — the single shared mode ('month' | 'year') + startDate/
@@ -469,13 +525,14 @@ src/
       types.ts     # Firestore document shapes (FirestoreCategoryDoc — fixed |
                     # percentage discriminated union with iconName, not icon —
                     # FirestoreIncomeSourceDoc, FirestorePaycheckDoc,
-                    # FirestorePurchaseDoc, FirestoreUserDoc). The 4 entity docs
-                    # (not FirestoreUserDoc) each carry optional createdAt/
-                    # updatedAt Timestamp fields — optional and absent from
-                    # what callers supply, since writes.ts injects them via
-                    # serverTimestamp() rather than any caller constructing one
-      sync.ts       # attachListeners(uid, callbacks) — 5 onSnapshot listeners
-                    # (4 subcollections + users/{uid} root doc), converts
+                    # FirestorePurchaseDoc, FirestorePlaidTransactionDoc,
+                    # FirestoreUserDoc). Every doc type except FirestoreUserDoc
+                    # carries optional createdAt/updatedAt Timestamp fields —
+                    # optional and absent from what callers supply, since
+                    # writes.ts injects them via serverTimestamp() rather than
+                    # any caller constructing one
+      sync.ts       # attachListeners(uid, callbacks) — 6 onSnapshot listeners
+                    # (5 subcollections + users/{uid} root doc), converts
                     # iconName → icon via iconMap on the way in, and each
                     # entity's createdAt/updatedAt Timestamp → ISO string via
                     # timestampToIso (docs written before the field existed
@@ -492,12 +549,24 @@ src/
                     # category/source doc in one writeBatch, so deleting a
                     # category or income source never leaves orphaned
                     # purchase/paycheck records behind pointing at an id that
-                    # no longer exists
+                    # no longer exists. writePlaidTransaction — inserts one raw
+                    # synced transaction (only called by plaidDemoData.ts's
+                    # seed today; a real Plaid sync would call this too).
+                    # categorizePlaidTransactionAsSpending/AsIncome — the
+                    # categorization write: one batch creates a real Purchase/
+                    # Paycheck from the transaction's data AND marks the
+                    # transaction resolved (categoryId+purchaseId or
+                    # sourceId+paycheckId), so it counts toward real totals and
+                    # is never categorized twice
       users.ts      # ensureUserDoc(uid) — idempotent setDoc(...,{merge:true}),
                     # called on every sign-in so it never clobbers existing
                     # bankBalance/paychecksPerMonth
       demoData.ts   # loadDemoData(uid) — one writeBatch (~40 writes) seeding
                     # demoData.ts's dataset into a user's own Firestore docs
+      plaidDemoData.ts # simulateBankSync(uid) — one writeBatch seeding
+                    # src/lib/plaidDemoData.ts's ~10 fake, deliberately
+                    # all-uncategorized transactions; stands in for a real
+                    # Plaid transactions-sync webhook (see functions/src/index.ts)
     tax/
       brackets.ts  # Pure data: FEDERAL_BRACKETS_2026, CA_BRACKETS_2025, standard
                     # deductions, SE tax/QBI/SDI constants, each labeled with its
@@ -588,10 +657,25 @@ src/
     paycheck.ts    # Paycheck (id, amount, date as ISO "YYYY-MM-DD" string, sourceId
                     # referencing an IncomeSource)
     purchase.ts    # Purchase (id, categoryId, date, description, amount)
+    plaidTransaction.ts # PlaidTransaction (id, accountName, amount, date,
+                    # merchantName, plaidCategory, transactionType: 'spending' |
+                    # 'income' | 'transfer', pending, optional categoryId+
+                    # purchaseId or sourceId+paycheckId once categorized) — a raw
+                    # bank transaction synced from Plaid, distinct from
+                    # Purchase/Paycheck; isPlaidTransactionCategorized() helper
   vite-env.d.ts    # ImportMetaEnv typing for VITE_FIREBASE_*/VITE_USE_FIREBASE_EMULATORS vars
 
 functions/
-  src/index.ts     # Cloud Functions entry point (empty placeholder for now)
+  src/index.ts     # Cloud Functions entry point. Two real, compiling function
+                    # stubs, neither connected to anything real yet: plaidWebhook
+                    # (onRequest — would receive Plaid's transaction-sync
+                    # webhook; needs a developer sandbox account + the `plaid`
+                    # npm package) and categorizeTransaction (onDocumentCreated
+                    # on users/{uid}/plaidTransactions/{transactionId} — would
+                    # call an AI Agent API to auto-categorize; needs an API key
+                    # + provider decision). Both documented with the exact next
+                    # step needed to make them real — see the Plaid bullet in
+                    # CLAUDE.md's Current Status
 ```
 
 Conventions:
@@ -2170,3 +2254,84 @@ unique findings, not the standard checklist.
   a second time worked. Not investigated further — flagged here in case
   it recurs, consistent with this file's existing note about occasional
   automation-tool click flakiness.
+
+### 2026-07-22 — Plaid integration prep (data model, UI, Cloud Functions scaffolding)
+- User asked to prepare the front-end and backend for Plaid: a "logs"
+  section on Spending/Income showing raw bank transactions Plaid would
+  receive, plus a (not-yet-existing) AI Agent API that would auto-sort
+  spending/income/transfers into budget categories/income sources. Neither
+  Plaid nor an AI Agent API has credentials yet, so this was scoped as
+  real, working scaffolding — not a live integration. Two consequential
+  design forks were resolved via `AskUserQuestion` before writing code:
+  (1) once the (future) AI agent categorizes a transaction, does it count
+  toward real Budget/Spending/Income totals, or stay a separate
+  visibility-only log? → **counts as real ledger data**; (2) is there any
+  way to see/test this today given no real Plaid/AI access? → **yes,
+  add a "Simulate bank sync" demo action** seeding fake transactions.
+- **The "counts as real data" answer directly shaped the whole design**:
+  rather than teaching `getCategorySpent`/`getIncomeInRange` a second data
+  source, categorizing a `PlaidTransaction` (`src/types/plaidTransaction.ts`
+  — a new type, distinct from `Purchase`/`Paycheck`) **creates a genuine
+  Purchase or Paycheck doc from it** in one `writeBatch`
+  (`categorizePlaidTransactionAsSpending`/`AsIncome` in
+  `src/lib/firestore/writes.ts`), while also marking the source transaction
+  resolved (`categoryId`+`purchaseId` or `sourceId`+`paycheckId`) so it's
+  never double-categorized. This meant **zero changes** were needed to any
+  existing derived-value helper (`getCategorySpent`, `getIncomeInRange`,
+  `getTotalSpent`, etc.) — they already just query the `purchases`/
+  `paychecks` collections, and a categorized Plaid transaction is now a
+  real doc in those same collections. Verified this directly: categorizing
+  a $52.30 Starbucks transaction as "Dining Out" moved Spending's total
+  from $3,412.00 → $3,464.30, the Dining Out category from $312.00 →
+  $364.30, and the transaction showed up as a genuine, individually-
+  deletable purchase when the category row was expanded on the Budget tab
+  — not a special case, just the same Purchase list every other purchase
+  lives in.
+- New `users/{uid}/plaidTransactions` Firestore collection (rules mirror
+  the existing per-collection pattern, plus a stricter `update` rule
+  requiring the Plaid-synced fields — amount, date, merchantName, etc. —
+  stay unchanged and only `categoryId`/`purchaseId`/`sourceId`/`paycheckId`
+  +`updatedAt` may change, since categorization is the only update path
+  that exists). Synced via a 6th `onSnapshot` listener in
+  `src/lib/firestore/sync.ts`, following the same one-writer pattern as
+  every other collection.
+- Built `SpendingBankActivity`/`IncomeBankActivity` — a "Bank activity"
+  card listing transactions of the matching `transactionType` within the
+  shared date filter's range, most-recent-first. An uncategorized
+  transaction shows an inline category/source `Select`; picking a value
+  categorizes it immediately (no separate confirm button — this app's
+  first single-action-dropdown UI, deliberately simpler than a 2-step
+  dialog since categorizing is easily reversible by deleting the resulting
+  purchase/paycheck the normal way). This manual control **is** the
+  categorization mechanism today; it's also exactly what a real AI agent
+  would eventually do automatically, from the server side instead of a
+  click.
+- Built `SimulateBankSyncButton` (mirrors `LoadDemoDataButton` exactly —
+  AlertDialog-confirmed, only shown while `plaidTransactions` is empty) +
+  `src/lib/plaidDemoData.ts`'s ~10 fake transactions. Deliberately left
+  **all** of them uncategorized (unlike `demoData.ts`'s categorized mock
+  budget data) — avoids a chicken-and-egg dependency on specific category
+  ids already existing, and better represents "just arrived from the
+  bank," giving the manual categorize flow something real to do.
+- Added two real, compiling Cloud Function stubs to `functions/src/index.ts`
+  — `plaidWebhook` (`onRequest`) and `categorizeTransaction`
+  (`onDocumentCreated` on `plaidTransactions`) — using `firebase-functions`'s
+  v2 modular API (confirmed available in the installed `^7.2.5`). Each is
+  documented with the exact remaining step (Plaid dev credentials + the
+  `plaid` package; an AI Agent API key + provider decision) rather than
+  importing a package that doesn't exist yet, which would've broken the
+  build. **Found and fixed a real, pre-existing gap while verifying**:
+  `functions/tsconfig.json` had no `rootDir`, which `tsc --noEmit` (this
+  repo's established functions-verification command) never surfaces but a
+  genuine `tsc` emit does (`TS5011`) — likely never caught before because
+  `npm run build` (the emit path) had apparently never actually been run
+  in a prior session. Added `"rootDir": "src"`, a one-line, behavior-
+  preserving fix.
+- Verified end-to-end via the dev server: `tsc -b`/`lint`/`build` clean for
+  both the app and `functions/`; "Simulate bank sync" seeded 5 spending +
+  3 income + 2 transfer transactions (transfers correctly never appear in
+  either log); categorized the Starbucks transaction as spending (see
+  above) and a $65.20 Airbnb payout as income (Earned This Month correctly
+  went from $6,980.00 → $7,045.20, W-2 Job's total increased by the same
+  $65.20) — both confirmed as real, permanent Purchase/Paycheck docs, not
+  a parallel ledger.

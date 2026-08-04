@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { MoneySummaryRow } from '@/components/dashboard/MoneySummaryRow'
 import { LoadDemoDataButton } from '@/components/dashboard/LoadDemoDataButton'
+import { SimulateBankSyncButton } from '@/components/dashboard/SimulateBankSyncButton'
 import { SignOutButton } from '@/components/auth/SignOutButton'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { DateFilterTabs } from '@/components/budget/DateFilterTabs'
@@ -20,6 +21,7 @@ export default function HomePage() {
         <h1 className="text-2xl font-semibold tracking-tight">ClearBooks</h1>
         <div className="flex items-center gap-2">
           <LoadDemoDataButton />
+          <SimulateBankSyncButton />
           <SignOutButton />
         </div>
       </div>

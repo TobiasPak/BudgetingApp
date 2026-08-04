@@ -1,6 +1,7 @@
 import type { Timestamp } from 'firebase/firestore'
 import type { ChartColorToken } from '@/types/budget'
 import type { IncomeType } from '@/types/incomeSource'
+import type { PlaidTransactionType } from '@/types/plaidTransaction'
 
 // Firestore document shapes — the on-disk/on-wire representation of each
 // entity. Distinct from the in-memory app types (BudgetCategory, Paycheck,
@@ -71,4 +72,20 @@ export interface FirestorePurchaseDoc {
 export interface FirestoreUserDoc {
   bankBalance: number
   paychecksPerMonth: number
+}
+
+export interface FirestorePlaidTransactionDoc {
+  accountName: string
+  amount: number
+  date: string
+  merchantName: string
+  plaidCategory: string
+  transactionType: PlaidTransactionType
+  pending: boolean
+  categoryId?: string
+  purchaseId?: string
+  sourceId?: string
+  paycheckId?: string
+  createdAt?: Timestamp
+  updatedAt?: Timestamp
 }

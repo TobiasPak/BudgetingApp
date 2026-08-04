@@ -1,6 +1,7 @@
 import { IncomeSummary } from '@/components/income/IncomeSummary'
 import { IncomeSourceRow } from '@/components/income/IncomeSourceRow'
 import { AddIncomeSourceDialog } from '@/components/income/AddIncomeSourceDialog'
+import { IncomeBankActivity } from '@/components/income/IncomeBankActivity'
 import { useBudgetStore } from '@/stores/useBudgetStore'
 import { useDateFilterStore, useDateFilterRange } from '@/stores/useDateFilterStore'
 import { getIncomeInRange, getSourceIncomeInRange } from '@/lib/income'
@@ -42,6 +43,8 @@ export function IncomeContent() {
           )
         })}
       </div>
+
+      <IncomeBankActivity incomeSources={incomeSources} range={range} />
     </>
   )
 }

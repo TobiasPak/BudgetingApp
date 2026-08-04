@@ -10,11 +10,13 @@ import { getIcon } from '@/lib/iconMap'
 import type { BudgetCategory } from '@/types/budget'
 import type { IncomeSource } from '@/types/incomeSource'
 import type { Paycheck } from '@/types/paycheck'
+import type { PlaidTransaction } from '@/types/plaidTransaction'
 import type { Purchase } from '@/types/purchase'
 import type {
   FirestoreCategoryDoc,
   FirestoreIncomeSourceDoc,
   FirestorePaycheckDoc,
+  FirestorePlaidTransactionDoc,
   FirestorePurchaseDoc,
   FirestoreUserDoc,
 } from './types'
@@ -31,6 +33,7 @@ interface SyncCallbacks {
   onIncomeSources: (sources: IncomeSource[]) => void
   onPaychecks: (paychecks: Paycheck[]) => void
   onPurchases: (purchases: Purchase[]) => void
+  onPlaidTransactions: (transactions: PlaidTransaction[]) => void
   onUserDoc: (data: FirestoreUserDoc) => void
   // Called exactly once, after every listener below has reported at least
   // one snapshot — lets the store flip `loading` to false only once all of
@@ -95,12 +98,35 @@ function purchaseDocToPurchase(id: string, data: FirestorePurchaseDoc): Purchase
   }
 }
 
+function plaidTransactionDocToTransaction(
+  id: string,
+  data: FirestorePlaidTransactionDoc
+): PlaidTransaction {
+  return {
+    id,
+    accountName: data.accountName,
+    amount: data.amount,
+    date: data.date,
+    merchantName: data.merchantName,
+    plaidCategory: data.plaidCategory,
+    transactionType: data.transactionType,
+    pending: data.pending,
+    categoryId: data.categoryId,
+    purchaseId: data.purchaseId,
+    sourceId: data.sourceId,
+    paycheckId: data.paycheckId,
+    createdAt: timestampToIso(data.createdAt),
+    updatedAt: timestampToIso(data.updatedAt),
+  }
+}
+
 export function attachListeners(uid: string, callbacks: SyncCallbacks): Unsubscribe[] {
   const fired = {
     categories: false,
     incomeSources: false,
     paychecks: false,
     purchases: false,
+    plaidTransactions: false,
     user: false,
   }
   function markFired(key: keyof typeof fired) {
@@ -114,6 +140,7 @@ export function attachListeners(uid: string, callbacks: SyncCallbacks): Unsubscr
   const incomeSourcesRef = collection(db, 'users', uid, 'incomeSources')
   const paychecksRef = collection(db, 'users', uid, 'paychecks')
   const purchasesRef = collection(db, 'users', uid, 'purchases')
+  const plaidTransactionsRef = collection(db, 'users', uid, 'plaidTransactions')
 
   return [
     onSnapshot(userRef, (snapshot) => {
@@ -154,6 +181,17 @@ export function attachListeners(uid: string, callbacks: SyncCallbacks): Unsubscr
         )
       )
       markFired('purchases')
+    }),
+    onSnapshot(plaidTransactionsRef, (snapshot) => {
+      callbacks.onPlaidTransactions(
+        snapshot.docs.map((d) =>
+          plaidTransactionDocToTransaction(
+            d.id,
+            d.data() as FirestorePlaidTransactionDoc
+          )
+        )
+      )
+      markFired('plaidTransactions')
     }),
   ]
 }

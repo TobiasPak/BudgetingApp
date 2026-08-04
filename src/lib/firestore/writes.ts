@@ -14,6 +14,7 @@ import type {
   FirestoreCategoryDoc,
   FirestoreIncomeSourceDoc,
   FirestorePaycheckDoc,
+  FirestorePlaidTransactionDoc,
   FirestorePurchaseDoc,
   FirestoreUserDoc,
 } from './types'
@@ -101,5 +102,77 @@ export async function deleteIncomeSource(uid: string, sourceId: string) {
   const batch = writeBatch(db)
   paychecksToDelete.forEach((paycheckDoc) => batch.delete(paycheckDoc.ref))
   batch.delete(doc(db, 'users', uid, 'incomeSources', sourceId))
+  return batch.commit()
+}
+
+// Inserts one raw bank transaction, uncategorized. Called by the (not yet
+// built) Plaid sync process in real usage — for now, only
+// src/lib/firestore/plaidDemoData.ts's "Simulate bank sync" seeding calls
+// this. In a real sync, the caller should set the Firestore doc id to
+// Plaid's own transaction_id (via setDoc(doc(db, ..., plaidTransactionId))
+// instead of an auto-id) so re-syncing the same transaction naturally
+// dedups instead of creating a duplicate — not needed for the demo seed,
+// which never re-syncs the same fake data twice.
+export function writePlaidTransaction(
+  uid: string,
+  transaction: FirestorePlaidTransactionDoc
+) {
+  return setDoc(doc(collection(db, 'users', uid, 'plaidTransactions')), {
+    ...transaction,
+    createdAt: serverTimestamp(),
+    updatedAt: serverTimestamp(),
+  })
+}
+
+// Categorizing a Plaid transaction creates a REAL Purchase/Paycheck doc
+// from it (so it counts toward budget/income totals exactly like a
+// manually-entered one — getCategorySpent/getIncomeInRange never need to
+// know Plaid exists, since they just query the same purchases/paychecks
+// collections either way) and marks the source transaction as resolved in
+// the same batch, so it's never offered for (re-)categorization again.
+// Today this is only ever called from a manual "Categorize as…" control in
+// the UI; the not-yet-built AI agent would call the equivalent operation
+// server-side from a Cloud Function instead (see functions/src/index.ts).
+export async function categorizePlaidTransactionAsSpending(
+  uid: string,
+  transactionId: string,
+  categoryId: string,
+  purchase: { date: string; description: string; amount: number }
+) {
+  const batch = writeBatch(db)
+  const purchaseRef = doc(collection(db, 'users', uid, 'purchases'))
+  batch.set(purchaseRef, {
+    categoryId,
+    ...purchase,
+    createdAt: serverTimestamp(),
+    updatedAt: serverTimestamp(),
+  })
+  batch.update(doc(db, 'users', uid, 'plaidTransactions', transactionId), {
+    categoryId,
+    purchaseId: purchaseRef.id,
+    updatedAt: serverTimestamp(),
+  })
+  return batch.commit()
+}
+
+export async function categorizePlaidTransactionAsIncome(
+  uid: string,
+  transactionId: string,
+  sourceId: string,
+  paycheck: { date: string; amount: number }
+) {
+  const batch = writeBatch(db)
+  const paycheckRef = doc(collection(db, 'users', uid, 'paychecks'))
+  batch.set(paycheckRef, {
+    sourceId,
+    ...paycheck,
+    createdAt: serverTimestamp(),
+    updatedAt: serverTimestamp(),
+  })
+  batch.update(doc(db, 'users', uid, 'plaidTransactions', transactionId), {
+    sourceId,
+    paycheckId: paycheckRef.id,
+    updatedAt: serverTimestamp(),
+  })
   return batch.commit()
 }
