@@ -15,6 +15,12 @@ functions/lib/
 .env.staging
 .env.production
 
+# plaid-server (node_modules/, dist/, and .env are already covered by the
+# bare patterns above, since they match at any depth). Firebase service
+# account keys specifically — never commit these regardless of filename.
+plaid-server/service-account-key.json
+plaid-server/*firebase-adminsdk*.json
+
 # Firebase
 .firebase/
 firebase-debug.log
