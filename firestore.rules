@@ -120,6 +120,18 @@ service cloud.firestore {
           && request.resource.data.createdAt == resource.data.createdAt
           && request.resource.data.updatedAt == request.time;
       }
+
+      // Plaid item credentials (access_token + sync cursor per linked bank
+      // account) — see plaid-server/src/routes/exchangeToken.ts and
+      // syncTransactions.ts. Deliberately DENY the client entirely, both
+      // read and write: access_token grants ongoing read access to the
+      // user's real bank account, so it must never be readable from the
+      // browser, only by plaid-server's Admin SDK (which bypasses these
+      // rules — this match block exists purely to guarantee no client path
+      // can ever reach this collection).
+      match /plaidItems/{itemId} {
+        allow read, write: if false;
+      }
     }
   }
 }

@@ -7,6 +7,7 @@
     "dev": "vite",
     "dev:staging": "vite --mode staging",
     "dev:prod": "vite --mode production",
+    "dev:all": "concurrently -n frontend,plaid-server -c blue,green \"npm run dev\" \"npm run dev --prefix plaid-server\"",
     "build": "tsc -b && vite build",
     "lint": "oxlint",
     "preview": "vite preview"
@@ -38,6 +39,7 @@
     "@types/react": "^18.3.12",
     "@types/react-dom": "^18.3.1",
     "@vitejs/plugin-react": "^6.0.3",
+    "concurrently": "^10.0.4",
     "oxlint": "^1.71.0",
     "tailwindcss": "^4.3.2",
     "typescript": "~6.0.2",
