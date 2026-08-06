@@ -1,8 +1,10 @@
 import { getTotalSpent } from './spending'
 import { annualize, isDateInRange, type DateFilterMode, type DateRange } from './period'
+import { isPlaidTransactionCategorized } from '@/types/plaidTransaction'
 import type { Paycheck } from '@/types/paycheck'
 import type { BudgetCategory } from '@/types/budget'
 import type { Purchase } from '@/types/purchase'
+import type { PlaidTransaction } from '@/types/plaidTransaction'
 import type { IncomeSource } from '@/types/incomeSource'
 
 export function getPaychecksInRange(
@@ -12,8 +14,37 @@ export function getPaychecksInRange(
   return paychecks.filter((paycheck) => isDateInRange(paycheck.date, range))
 }
 
-export function getIncomeInRange(paychecks: Paycheck[], range: DateRange): number {
-  return getPaychecksInRange(paychecks, range).reduce((sum, p) => sum + p.amount, 0)
+// Total income within the selected range — real money that actually landed
+// in the account, whether or not it's been sorted into an income source
+// yet. Sums every Paycheck (manually entered or created via categorizing a
+// Plaid transaction) plus every synced Plaid transaction that's
+// income-type but not yet categorized — same "count every real
+// transaction regardless of categorization" design as getTotalSpent in
+// src/lib/spending.ts, and the same double-count guard: a categorized
+// transaction already has a corresponding Paycheck counted in the first
+// half. Per-source figures (getSourceIncomeInRange) intentionally stay
+// paycheck-only below, since an uncategorized transaction has no source to
+// attribute it to.
+export function getIncomeInRange(
+  paychecks: Paycheck[],
+  plaidTransactions: PlaidTransaction[],
+  range: DateRange
+): number {
+  const paycheckTotal = getPaychecksInRange(paychecks, range).reduce(
+    (sum, p) => sum + p.amount,
+    0
+  )
+
+  const uncategorizedIncomeTotal = plaidTransactions
+    .filter(
+      (t) =>
+        t.transactionType === 'income' &&
+        !isPlaidTransactionCategorized(t) &&
+        isDateInRange(t.date, range)
+    )
+    .reduce((sum, t) => sum + t.amount, 0)
+
+  return paycheckTotal + uncategorizedIncomeTotal
 }
 
 // Actual cash leftover from the selected range's earnings after spending —
@@ -23,11 +54,14 @@ export function getIncomeInRange(paychecks: Paycheck[], range: DateRange): numbe
 // there's nothing to project.
 export function getLeftoverCash(
   paychecks: Paycheck[],
-  categories: BudgetCategory[],
   purchases: Purchase[],
+  plaidTransactions: PlaidTransaction[],
   range: DateRange
 ): number {
-  return getIncomeInRange(paychecks, range) - getTotalSpent(categories, purchases, range)
+  return (
+    getIncomeInRange(paychecks, plaidTransactions, range) -
+    getTotalSpent(purchases, plaidTransactions, range)
+  )
 }
 
 // This source's paychecks within the selected range, most recent first —
@@ -78,10 +112,11 @@ interface MonthlyTargetContext {
 // 'year' mode it's that year's total income ÷ 12 (an average monthly rate).
 export function getMonthlyIncomeEquivalent(
   paychecks: Paycheck[],
+  plaidTransactions: PlaidTransaction[],
   mode: DateFilterMode,
   range: DateRange
 ): number {
-  const incomeInRange = getIncomeInRange(paychecks, range)
+  const incomeInRange = getIncomeInRange(paychecks, plaidTransactions, range)
   return annualize(incomeInRange, mode) / 12
 }
 

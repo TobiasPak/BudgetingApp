@@ -107,10 +107,14 @@ function plaidTransactionDocToTransaction(
     accountName: data.accountName,
     amount: data.amount,
     date: data.date,
+    authorizedDate: data.authorizedDate,
     merchantName: data.merchantName,
+    logoUrl: data.logoUrl,
     plaidCategory: data.plaidCategory,
+    plaidCategoryPrimary: data.plaidCategoryPrimary,
     transactionType: data.transactionType,
     pending: data.pending,
+    raw: data.raw,
     categoryId: data.categoryId,
     purchaseId: data.purchaseId,
     sourceId: data.sourceId,
@@ -146,7 +150,7 @@ export function attachListeners(uid: string, callbacks: SyncCallbacks): Unsubscr
     onSnapshot(userRef, (snapshot) => {
       const data = snapshot.exists()
         ? (snapshot.data() as FirestoreUserDoc)
-        : { bankBalance: 0, paychecksPerMonth: 2 }
+        : { bankBalance: 0, paychecksPerMonth: 2, hasLinkedBank: false }
       callbacks.onUserDoc(data)
       markFired('user')
     }),

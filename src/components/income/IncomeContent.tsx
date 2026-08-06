@@ -12,11 +12,12 @@ import { getIncomeInRange, getSourceIncomeInRange } from '@/lib/income'
 export function IncomeContent() {
   const incomeSources = useBudgetStore((state) => state.incomeSources)
   const paychecks = useBudgetStore((state) => state.paychecks)
+  const plaidTransactions = useBudgetStore((state) => state.plaidTransactions)
 
   const mode = useDateFilterStore((state) => state.mode)
   const range = useDateFilterRange()
 
-  const windowIncome = getIncomeInRange(paychecks, range)
+  const windowIncome = getIncomeInRange(paychecks, plaidTransactions, range)
 
   return (
     <>

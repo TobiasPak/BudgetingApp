@@ -28,13 +28,12 @@ interface IncomeBankActivityProps {
 }
 
 // Mirrors SpendingBankActivity — a "logs" view of raw bank transactions
-// synced from Plaid (not yet wired to a real connection — see the
-// "Simulate bank sync" button and functions/src/index.ts), showing only
-// money received. Categorizing a transaction here creates a real Paycheck
-// from it (see categorizeTransactionAsIncome in useBudgetStore), so it then
-// shows up in the source breakdown/totals too, exactly like a manually-
-// added paycheck. Standing in for what the not-yet-built AI categorization
-// agent would eventually do automatically.
+// synced from a real linked Plaid account (see ConnectBankButton), showing
+// only money received. Categorizing a transaction here creates a real
+// Paycheck from it (see categorizeTransactionAsIncome in useBudgetStore),
+// so it then shows up in the source breakdown/totals too, exactly like a
+// manually-added paycheck. Standing in for what the not-yet-built AI
+// categorization agent would eventually do automatically.
 export function IncomeBankActivity({ incomeSources, range }: IncomeBankActivityProps) {
   const plaidTransactions = useBudgetStore((state) => state.plaidTransactions)
   const categorizeTransactionAsIncome = useBudgetStore(
@@ -64,6 +63,13 @@ export function IncomeBankActivity({ incomeSources, range }: IncomeBankActivityP
           >
             <div className="min-w-0 flex-1">
               <div className="flex items-center gap-2">
+                {transaction.logoUrl && (
+                  <img
+                    src={transaction.logoUrl}
+                    alt=""
+                    className="size-6 shrink-0 rounded"
+                  />
+                )}
                 <span className="truncate text-sm font-medium">
                   {transaction.merchantName}
                 </span>
@@ -74,7 +80,14 @@ export function IncomeBankActivity({ incomeSources, range }: IncomeBankActivityP
                 )}
               </div>
               <p className="truncate text-xs text-muted-foreground">
-                {formatTransactionDate(transaction.date)} · {transaction.plaidCategory}
+                {formatTransactionDate(transaction.date)}
+                {transaction.authorizedDate &&
+                  transaction.authorizedDate !== transaction.date &&
+                  ` (authorized ${formatTransactionDate(transaction.authorizedDate)})`}{' '}
+                · {transaction.plaidCategory}
+              </p>
+              <p className="truncate text-xs text-muted-foreground">
+                {transaction.accountName}
               </p>
             </div>
 

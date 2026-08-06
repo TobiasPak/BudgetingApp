@@ -29,9 +29,9 @@ export const toneClasses: Record<
 // the strip never silently claims to be "this month" while actually
 // showing history.
 export function MoneySummaryRow() {
-  const categories = useBudgetStore((state) => state.categories)
   const paychecks = useBudgetStore((state) => state.paychecks)
   const purchases = useBudgetStore((state) => state.purchases)
+  const plaidTransactions = useBudgetStore((state) => state.plaidTransactions)
   const mode = useDateFilterStore((state) => state.mode)
   const range = useDateFilterRange()
 
@@ -47,9 +47,9 @@ export function MoneySummaryRow() {
       : 'this year'
     : `in ${formatRangeLabel(mode, range)}`
 
-  const windowIncome = getIncomeInRange(paychecks, range)
-  const totalSpent = getTotalSpent(categories, purchases, range)
-  const leftover = getLeftoverCash(paychecks, categories, purchases, range)
+  const windowIncome = getIncomeInRange(paychecks, plaidTransactions, range)
+  const totalSpent = getTotalSpent(purchases, plaidTransactions, range)
+  const leftover = getLeftoverCash(paychecks, purchases, plaidTransactions, range)
   const spentPercentOfIncome =
     windowIncome > 0 ? (totalSpent / windowIncome) * 100 : 0
   const leftoverTone: PanelTone = leftover < 0 ? 'destructive' : 'success'

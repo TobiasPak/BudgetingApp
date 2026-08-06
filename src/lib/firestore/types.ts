@@ -72,16 +72,30 @@ export interface FirestorePurchaseDoc {
 export interface FirestoreUserDoc {
   bankBalance: number
   paychecksPerMonth: number
+  // Set by plaid-server (never the client) once a Plaid Link connection
+  // succeeds — see plaid-server/src/routes/exchangeToken.ts. Optional
+  // since every pre-Plaid user doc predates this field.
+  hasLinkedBank?: boolean
 }
 
 export interface FirestorePlaidTransactionDoc {
   accountName: string
   amount: number
   date: string
+  authorizedDate?: string
   merchantName: string
+  logoUrl?: string
   plaidCategory: string
+  plaidCategoryPrimary?: string
   transactionType: PlaidTransactionType
   pending: boolean
+  // The complete Plaid transaction object, written by plaid-server. Loosely
+  // typed here (rather than hand-mirroring Plaid's full Transaction
+  // interface) since the `plaid` npm package isn't installed in this
+  // project and nothing in src/ reads a specific sub-field yet — see
+  // PlaidTransaction.raw in src/types/plaidTransaction.ts for why it's
+  // kept at all.
+  raw?: Record<string, unknown>
   categoryId?: string
   purchaseId?: string
   sourceId?: string

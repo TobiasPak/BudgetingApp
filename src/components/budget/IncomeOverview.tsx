@@ -27,8 +27,10 @@ interface IncomeOverviewProps {
 
 export function IncomeOverview({ mode, range }: IncomeOverviewProps) {
   const paychecks = useBudgetStore((state) => state.paychecks)
+  const plaidTransactions = useBudgetStore((state) => state.plaidTransactions)
   const bankBalance = useBudgetStore((state) => state.bankBalance)
   const setBankBalance = useBudgetStore((state) => state.setBankBalance)
+  const hasLinkedBank = useBudgetStore((state) => state.hasLinkedBank)
   const removePaycheck = useBudgetStore((state) => state.removePaycheck)
 
   const today = new Date()
@@ -38,7 +40,7 @@ export function IncomeOverview({ mode, range }: IncomeOverviewProps) {
         range.start.getMonth() === today.getMonth()
       : range.start.getFullYear() === today.getFullYear()
 
-  const windowIncome = getIncomeInRange(paychecks, range)
+  const windowIncome = getIncomeInRange(paychecks, plaidTransactions, range)
   // Complementary granularity, mirroring BudgetSummary: an annual projection
   // while viewing a month, a monthly average while viewing a whole year.
   const secondaryLabel = mode === 'month' ? 'Projected this year' : 'Monthly average'
@@ -71,17 +73,30 @@ export function IncomeOverview({ mode, range }: IncomeOverviewProps) {
             <p className="text-xl font-semibold">${formatCurrency(secondaryValue)}</p>
           </div>
           <div className="space-y-1">
-            <Label htmlFor="bankBalance" className="text-xs text-muted-foreground">
-              Bank balance
+            <Label
+              htmlFor={hasLinkedBank ? undefined : 'bankBalance'}
+              className="text-xs text-muted-foreground"
+            >
+              Bank balance{hasLinkedBank ? ' (from linked bank)' : ''}
             </Label>
-            <Input
-              id="bankBalance"
-              type="number"
-              step="0.01"
-              value={bankBalance}
-              onChange={(e) => setBankBalance(e.target.valueAsNumber || 0)}
-              className="h-8 text-xl font-semibold"
-            />
+            {hasLinkedBank ? (
+              // Read-only once a real bank is linked — plaid-server writes this
+              // field directly (sync_balance), so a manual edit here would just
+              // get overwritten by the next sync. Editable input is only for
+              // users who haven't connected a bank yet.
+              <p className="h-8 text-xl font-semibold leading-8">
+                ${formatCurrency(bankBalance)}
+              </p>
+            ) : (
+              <Input
+                id="bankBalance"
+                type="number"
+                step="0.01"
+                value={bankBalance}
+                onChange={(e) => setBankBalance(e.target.valueAsNumber || 0)}
+                className="h-8 text-xl font-semibold"
+              />
+            )}
           </div>
         </div>
 
