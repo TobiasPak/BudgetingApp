@@ -18,12 +18,13 @@ import {
 export function BudgetContent() {
   const categories = useBudgetStore((state) => state.categories)
   const paychecks = useBudgetStore((state) => state.paychecks)
+  const plaidTransactions = useBudgetStore((state) => state.plaidTransactions)
   const paychecksPerMonth = useBudgetStore((state) => state.paychecksPerMonth)
 
   const mode = useDateFilterStore((state) => state.mode)
   const range = useDateFilterRange()
 
-  const monthlyIncome = getMonthlyIncomeEquivalent(paychecks, mode, range)
+  const monthlyIncome = getMonthlyIncomeEquivalent(paychecks, plaidTransactions, mode, range)
   const averagePaycheckAmount = getAveragePaycheckAmount(paychecks)
   const targetContext = { monthlyIncome, averagePaycheckAmount, paychecksPerMonth }
 

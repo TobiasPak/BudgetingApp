@@ -7,7 +7,7 @@
     "dev": "vite",
     "dev:staging": "vite --mode staging",
     "dev:prod": "vite --mode production",
-    "dev:all": "concurrently -n frontend,plaid-server -c blue,green \"npm run dev\" \"npm run dev --prefix plaid-server\"",
+    "dev:all": "concurrently -n emulators,frontend,plaid-server -c yellow,blue,green \"firebase emulators:start --only auth,firestore\" \"npm run dev\" \"npm run dev --prefix plaid-server\"",
     "build": "tsc -b && vite build",
     "lint": "oxlint",
     "preview": "vite preview"
@@ -24,6 +24,7 @@
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "react-hook-form": "^7.80.0",
+    "react-plaid-link": "^5.0.0",
     "react-router-dom": "^7.18.1",
     "recharts": "^3.9.1",
     "shadcn": "^4.12.0",

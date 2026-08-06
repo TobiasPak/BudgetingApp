@@ -14,7 +14,6 @@ import type {
   FirestoreCategoryDoc,
   FirestoreIncomeSourceDoc,
   FirestorePaycheckDoc,
-  FirestorePlaidTransactionDoc,
   FirestorePurchaseDoc,
   FirestoreUserDoc,
 } from './types'
@@ -103,25 +102,6 @@ export async function deleteIncomeSource(uid: string, sourceId: string) {
   paychecksToDelete.forEach((paycheckDoc) => batch.delete(paycheckDoc.ref))
   batch.delete(doc(db, 'users', uid, 'incomeSources', sourceId))
   return batch.commit()
-}
-
-// Inserts one raw bank transaction, uncategorized. Called by the (not yet
-// built) Plaid sync process in real usage — for now, only
-// src/lib/firestore/plaidDemoData.ts's "Simulate bank sync" seeding calls
-// this. In a real sync, the caller should set the Firestore doc id to
-// Plaid's own transaction_id (via setDoc(doc(db, ..., plaidTransactionId))
-// instead of an auto-id) so re-syncing the same transaction naturally
-// dedups instead of creating a duplicate — not needed for the demo seed,
-// which never re-syncs the same fake data twice.
-export function writePlaidTransaction(
-  uid: string,
-  transaction: FirestorePlaidTransactionDoc
-) {
-  return setDoc(doc(collection(db, 'users', uid, 'plaidTransactions')), {
-    ...transaction,
-    createdAt: serverTimestamp(),
-    updatedAt: serverTimestamp(),
-  })
 }
 
 // Categorizing a Plaid transaction creates a REAL Purchase/Paycheck doc

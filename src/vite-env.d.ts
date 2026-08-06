@@ -11,6 +11,11 @@ interface ImportMetaEnv {
   // Optional — App Check is skipped entirely when this is unset (see
   // src/lib/firebase.ts), which is the intended state for .env.local.
   readonly VITE_FIREBASE_RECAPTCHA_SITE_KEY?: string
+  // Optional — the origin plaid-server is running at (see src/lib/plaidServer.ts).
+  // Only .env.local has a real value today; staging/production have no
+  // deployed plaid-server yet. Not a secret — it's just a URL, the actual
+  // Plaid client id/secret never reach the frontend either way.
+  readonly VITE_PLAID_SERVER_URL?: string
 }
 
 interface ImportMeta {

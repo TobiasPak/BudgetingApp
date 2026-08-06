@@ -9,11 +9,11 @@ including hybrid users who combine several of these.
 
 Planned feature areas not yet built (budgeting, income tracking, and the
 federal/CA tax tracker are already built — see Current Status):
-- Bank connectivity via Plaid (12,000+ institutions, OAuth, real-time sync,
-  recurring subscription detection) — the frontend/backend data model, UI,
-  and Cloud Functions scaffolding are prepped (see Current Status' Plaid
-  bullet), but the actual Plaid Link/OAuth flow and a real developer
-  sandbox account are still needed
+- Bank connectivity via Plaid (12,000+ institutions, real-time sync,
+  recurring subscription detection) — the real Link connect flow is
+  built and sandbox-verified (see Current Status' Plaid Link bullet);
+  still needed: OAuth-institution testing, the `investments` product, and
+  a staging/production deployment of `plaid-server`
 - AI-agent-based auto-categorization of synced bank transactions into
   budget categories/income sources — same story: the categorization
   write path and manual "Categorize…" UI exist and work today, but the
@@ -38,7 +38,7 @@ federal/CA tax tracker are already built — see Current Status):
 | Charts | Recharts |
 | Backend | Firebase Cloud Functions (Node.js + TypeScript) for AI categorization; a separate standalone Express + TypeScript server (`plaid-server/`) for all real Plaid API calls — see the Bank connectivity row for why |
 | Database & Auth | Firebase Firestore + Firebase Auth |
-| Bank connectivity | Plaid — client id/secret plumbing, Link/exchange/sync routes, and a Firestore write path are built in `plaid-server/` (see Current Status), not yet wired to the frontend or exercised against a real linked account. Deliberately NOT a Firebase Cloud Function: Cloud Functions can't make outbound third-party API calls on the free Spark plan, and Secret Manager (needed to hold the Plaid secret) requires Blaze — `plaid-server` is a plain Node process so it needs neither |
+| Bank connectivity | Plaid — real, sandbox-verified Link connect flow: `ConnectBankButton` (`src/components/dashboard/`) + `src/lib/plaidServer.ts` on the frontend, calling `plaid-server/`'s Link/exchange/transactions-sync/balance-sync routes (see Current Status). Real transaction data (spending/income, classified) and real account balance (`bankBalance`, summed across linked `depository` accounts) are both pulled from Plaid once a bank is linked — nothing else (investments, liabilities) yet. Deliberately NOT a Firebase Cloud Function: Cloud Functions can't make outbound third-party API calls on the free Spark plan, and Secret Manager (needed to hold the Plaid secret) requires Blaze — `plaid-server` is a plain Node process so it needs neither. Local dev only — no staging/production deployment of `plaid-server` yet |
 | Receipt OCR | Veryfi (not yet integrated) |
 | Mileage | Manual entry + MileIQ import (not yet built) |
 | Email | Resend or SendGrid (not yet integrated) |
@@ -52,7 +52,7 @@ what the installed create-vite version ships.
 
 ## Current Status
 
-**Budget envelopes (with delete) + revamped tabbed dashboard home + income tracking (W-2/contracted/self-employed classification, with delete) + a single shared month/year date filter (bookmark-style tabs, not a popover) driving every tab and standalone route + real Firebase Auth/Firestore persistence (staging + production environments, now with Firebase App Check/reCAPTCHA v3 wired in Unenforced mode) + federal/California tax estimate + Firestore audit timestamps on every record + Plaid integration prep (bank-transaction data model/UI/Cloud Functions scaffolding, with a "Simulate bank sync" demo action standing in for a real Plaid connection). Plaid/AI categorization credentials still not obtained — see the Plaid bullet below for exactly what is and isn't real yet.**
+**Budget envelopes (with delete) + revamped tabbed dashboard home + income tracking (W-2/contracted/self-employed classification, with delete) + a single shared month/year date filter (bookmark-style tabs, not a popover) driving every tab and standalone route + real Firebase Auth/Firestore persistence (staging + production environments, now with Firebase App Check/reCAPTCHA v3 wired in Unenforced mode) + federal/California tax estimate + Firestore audit timestamps on every record + a real, sandbox-verified Plaid Link bank-connection flow (via a standalone `plaid-server/` backend — not Firebase Cloud Functions) with automatic sync on sign-in, real transaction classification (explicit INCOME/transfer category checks, not just sign-based) and a real, Plaid-sourced account balance that replaces the manual entry once a bank is linked (the old "Simulate bank sync" demo action was deleted once this superseded it). AI categorization credentials still not obtained — see the Plaid bullets below for exactly what is and isn't real yet.**
 
 Implemented:
 - Project scaffold (Vite + React 18 + TypeScript), clean `npm install`
@@ -72,10 +72,13 @@ Implemented:
   `paychecksPerMonth`. Actions: `addCategory`, `addIncomeSource`,
   `addPaycheck`, `removePaycheck`, `addPurchase`, `removePurchase`,
   `setBankBalance`, `setPaychecksPerMonth`. Now Firestore-backed — new
-  accounts start empty (see the "Firestore-backed" and "Load demo data"
-  bullets below for the current persistence model and how the original
-  mock dataset — 9 categories, 5 income sources, 6 paychecks, ~19
-  purchases — is still reachable on demand)
+  accounts start empty (see the "Firestore-backed" bullet below for the
+  current persistence model). The old hardcoded mock dataset (9
+  categories, 5 income sources, 6 paychecks, ~19 purchases) and its
+  on-demand "Load demo data" seeding action (`LoadDemoDataButton`,
+  `src/lib/demoData.ts`, `src/lib/firestore/demoData.ts`) were deleted
+  outright once real Plaid sandbox data became the app's test-data
+  source — see the 2026-08-05 Session Log entry
 - **Income tracking**: paychecks are the source of truth for income —
   "money earned this month" is *derived* by summing paychecks dated in the
   current month (`src/lib/income.ts`), not a separately-typed number, so it
@@ -85,7 +88,9 @@ Implemented:
   paychecksPerMonth` (a projection independent of how many paychecks have
   landed yet this month) — see `getMonthlyTarget` in `src/lib/income.ts`
 - **Budget envelopes page** (`/budget`): `IncomeOverview` (earned this
-  month, projected this year, editable bank balance, this-month paycheck
+  month, projected this year, bank balance — editable once no bank is
+  linked, read-only and Plaid-sourced once one is (see the Plaid Link
+  bullet's balance-sync addition below), this-month paycheck
   list with remove + an "Add paycheck" dialog), `BudgetSummary`
   (monthly/yearly totals, ×12 derived), a log-style row list (not a card
   grid) with an "Add budget" dialog (name + fixed-amount-or-percentage +
@@ -267,14 +272,6 @@ Implemented:
   `getIcon()`), converted back to a component only inside the Firestore
   sync layer when hydrating a snapshot. None of the ~14 files that already
   render `category.icon`/`source.icon` as JSX needed to change
-- **"Load demo data"** (`src/components/dashboard/LoadDemoDataButton.tsx`):
-  the original hardcoded mock dataset moved verbatim to `src/lib/
-  demoData.ts` (no longer used to seed the store — only this button uses
-  it), behind an `AlertDialog` confirm, and only rendered when all 4
-  collections are genuinely empty (the primary safety rail against
-  clobbering real data). `loadDemoData(uid)` (`src/lib/firestore/
-  demoData.ts`) is one `writeBatch` (~40 writes, well under the 500-op
-  cap)
 - Toast notifications (shadcn `sonner`, mounted once in `src/main.tsx`)
   for Firestore write/listener failures — additive to, not a replacement
   for, existing inline Zod/RHF validation errors. Its generated
@@ -401,13 +398,14 @@ Implemented:
   category/source `Select` (categorizing is a single action — no separate
   confirm step) instead of a "categorized as X" badge. This manual
   "Categorize…" control is what actually does the categorizing today —
-  there's no real Plaid connection or AI agent yet, so nothing arrives or
-  sorts itself automatically. A **"Simulate bank sync" button**
-  (`SimulateBankSyncButton`, mirroring `LoadDemoDataButton`'s AlertDialog-
-  confirmed, only-shown-when-empty pattern) seeds ~10 realistic,
-  deliberately all-uncategorized fake transactions
-  (`src/lib/plaidDemoData.ts`) so the whole logs → categorize → totals-
-  update flow is testable today. `functions/src/index.ts` has one real,
+  there's a real Plaid connection now (see the Plaid Link bullet below),
+  but no AI agent yet, so nothing sorts itself automatically. The old
+  **"Simulate bank sync" button** (`SimulateBankSyncButton`,
+  `src/lib/plaidDemoData.ts`) that used to seed ~10 fake transactions as a
+  stand-in for a real connection has been **deleted outright** — now that
+  a real sandbox-verified Plaid Link flow exists, it was fully superseded
+  rather than kept as a fallback (see the 2026-08-05 Session Log entry).
+  `functions/src/index.ts` has one real,
   compiling (but unconnected) Cloud Function stub — `categorizeTransaction`
   (would fire on every new transaction and call an AI Agent API to assign
   a category automatically) — documented with exactly what's needed to
@@ -478,17 +476,256 @@ Implemented:
     `categorizeTransaction` (the future AI-agent auto-categorization
     trigger) is unrelated to this hosting decision, was left in place, and
     remains a live TODO regardless of which backend ends up calling it.
-  - **Not yet done**: installing/using the Plaid Link JS SDK on the
-    frontend, a "Connect a bank" button that calls `create_link_token` and
-    launches Link, calling `sync_transactions` on sign-in, and exercising
-    any of this against a real (even sandbox) linked account — this
-    session's work is the backend plumbing only, per explicit scope.
+- **Real Plaid Link connect flow — a working sandbox-tested bank
+  connection, not just backend plumbing anymore.** `src/lib/plaidServer.ts`
+  is the app's first external (non-Firebase) REST client — a single
+  `plaidFetch<T>()` helper that attaches a fresh Firebase ID token
+  (`getFirebaseAuth().currentUser?.getIdToken()`) as a Bearer header on
+  every call, wrapping `createLinkToken`/`exchangePublicToken`/
+  `syncTransactions` (matching `plaid-server`'s three routes exactly). New
+  `VITE_PLAID_SERVER_URL` env var (optional — only `.env.local` has a real
+  value today, `http://localhost:8090`; staging/production have no
+  deployed `plaid-server` yet).
+  - **`ConnectBankButton`** (`src/components/dashboard/`) branches on a
+    new `hasLinkedBank` boolean synced from the user's Firestore root doc
+    (`FirestoreUserDoc.hasLinkedBank`, written by `plaid-server` — never
+    the client — right after a successful link; the `plaidItems`
+    collection itself stays unreadable by design, so this flag is the only
+    way the UI can know a bank is connected). `!hasLinkedBank` renders
+    "Connect a bank": fetches a link token, then mounts a small
+    `PlaidLinkLauncher` child that calls `usePlaidLink({token, onSuccess,
+    onExit})` (from the newly-installed `react-plaid-link`) and opens it
+    via `useEffect(() => { if (ready) open() }, [ready, open])` — mounting
+    a child (rather than calling the hook inline with a possibly-empty
+    token) is what lets "fetch token, then open" stay clean, since hooks
+    must be called unconditionally. `onSuccess` chains
+    `exchangePublicToken` → `syncTransactions` in the same flow (the sync
+    happens immediately after linking, not deferred to next sign-in, per
+    explicit design). `hasLinkedBank` renders "Sync now" instead — a
+    plain button re-calling `syncTransactions()` on demand. Neither branch
+    manually mutates the store on success; the existing `users/{uid}`
+    Firestore listener does that automatically once `plaid-server`'s write
+    lands, same "Firestore is the one source of truth" pattern used
+    everywhere else in this app.
+  - **Automatic sync on every sign-in**, not just manual clicks —
+    `useAuthStore.ts`'s module-level `onAuthStateChanged` listener now
+    also calls a new `syncPlaidTransactionsOnceReady(uid)` after
+    `startSync(uid)`. Since `hasLinkedBank` isn't hydrated synchronously
+    (it arrives via the same async Firestore listener `startSync`
+    attaches), this is a one-shot `useBudgetStore.subscribe` that waits
+    for `loading` to flip `false` (the store's existing "every listener
+    has reported once" signal) before checking the flag and, if true,
+    calling `syncTransactions()` — wrapped so a failure (e.g.
+    `plaid-server` not running) only shows a toast and never blocks sign-in
+    itself. Re-checks the signed-in uid before actually syncing, guarding
+    against a stale trigger firing after a fast sign-out.
+  - **`exchangeToken.ts`** now writes both the `PlaidItemDoc` and the new
+    `hasLinkedBank: true` root-doc flag (`plaid-server/src/types.ts`'s
+    narrow `UserDocPlaidFields`, not a full `FirestoreUserDoc` mirror,
+    since `plaid-server` never touches `bankBalance`/`paychecksPerMonth`)
+    in a single `db.batch()`, so a crash between the two writes can't
+    leave one without the other.
+  - **`plaid-server` gained emulator support** (`USE_FIREBASE_EMULATORS`
+    env var): when true, `firebaseAdmin.ts` points the Admin SDK at
+    `127.0.0.1:9099`/`127.0.0.1:8080` instead of production, and skips
+    `GOOGLE_APPLICATION_CREDENTIALS` entirely — the emulators don't check
+    credentials. This is what actually made local end-to-end testing
+    possible without a real downloaded service account key.
+  - **`npm run dev:all` now also starts the Firebase emulators** (a third
+    `concurrently` process alongside frontend/`plaid-server`), so one
+    command boots the entire local stack.
+  - **Verified end-to-end against Plaid's real sandbox**, not mocked:
+    clicked "Connect a bank," completed Plaid Link's actual hosted flow
+    (phone verification, institution picker, account selection) against
+    "First Platypus Bank"/Tartan Bank test institutions using Plaid's own
+    fixed sandbox credentials, and confirmed a real `200 OK` all the way
+    through `create_link_token` → `exchange_public_token` →
+    `sync_transactions` (48 real sandbox transactions synced on first
+    link). Confirmed `hasLinkedBank` round-tripped through Firestore
+    correctly (button swapped from "Connect a bank" to "Sync now" with no
+    page reload), confirmed the synced transactions rendered in the
+    existing Bank Activity UI with real merchant names/Plaid categories/
+    amounts and could be categorized exactly like the fake "Simulate bank
+    sync" data (categorizing a $500 "Tectra Inc" transaction as Rent
+    correctly flowed into that month's real Spent total), confirmed
+    clicking "Sync now" again was idempotent (`syncedCount: 0`, no
+    duplicates), and confirmed the sign-out/sign-in auto-sync fired
+    without any manual click.
+  - **Found and fixed a real gap while testing**: the very first "Connect
+    a bank" attempt got a `401` from `create_link_token` even though the
+    request/token were correct — `plaid-server`'s Admin SDK was verifying
+    ID tokens against production Firebase while the frontend was signed in
+    via the local Auth emulator. Fixed by the `USE_FIREBASE_EMULATORS`
+    support above, which is also what unblocked testing without a real
+    service account key.
+  - **Known, harmless, unfixed quirk**: `onAuthStateChanged` fired twice
+    for one sign-in during testing (confirmed via two `sync_transactions`
+    calls ~14ms apart), a known Firebase Auth SDK behavior, not a bug in
+    the code above — harmless since the sync is cursor-based and
+    idempotent (the second call just finds nothing new), so not worth the
+    complexity of deduping.
+  - **Explicit `INCOME`/`TRANSFER_IN`/`TRANSFER_OUT` categorization
+    check, plus a new `plaidCategoryPrimary` field** —
+    `deriveTransactionType` (`syncTransactions.ts`) now checks Plaid's
+    `personal_finance_category.primary === 'INCOME'` explicitly before
+    falling back to the amount-sign heuristic, so a mis-signed edge case
+    can't silently misclassify a paycheck as spending; `TRANSFER_IN`/
+    `TRANSFER_OUT` (money moved between the user's own linked accounts,
+    not a third party) are still checked next and mapped to the existing
+    `'transfer'` bucket, excluded from both Bank Activity views.
+    `plaidCategoryPrimary` (Plaid's coarse ~16-value bucket, e.g.
+    `FOOD_AND_DRINK`) is now saved on every synced transaction alongside
+    the existing granular `plaidCategory` — specifically for a future
+    auto-sort-into-budget-categories feature to match against, since a
+    small stable set of buckets is far more useful for that than the
+    detailed taxonomy. Verified live against all 48 real synced sandbox
+    transactions (forced a full re-sync via a temporary cleared cursor)
+    — 0 missing `plaidCategoryPrimary`. **Found and reported, not
+    fixed, a real edge case**: 3 real "United Airlines" sandbox
+    transactions (`TRAVEL` category, negative amount — almost certainly
+    a simulated flight refund) were classified `'income'` by the
+    sign-based fallback, since Plaid's category taxonomy has no
+    refund-vs-genuine-income distinction. Left unresolved — correct
+    handling (e.g. a distinct refund type) is a product decision, not an
+    obvious bug fix, and hasn't been decided yet.
+  - **Real account balance, not just transactions** — a new
+    `POST /api/sync_balance` route (`plaid-server/src/routes/
+    syncBalance.ts`) calls Plaid's `accountsBalanceGet` (the real-time
+    variant, not the cached `accountsGet`) for every linked item, sums
+    `available` (falling back to `current` only when an institution
+    doesn't report `available`) across every `depository`-type account
+    only — a `credit`-type account's balance is debt owed, not cash on
+    hand, and folding it in would make "bank balance" mean something
+    different depending on which accounts happen to be linked — and
+    writes the total to `users/{uid}.bankBalance`, the same field the
+    old manual entry used. Wired into every existing sync trigger point
+    alongside `syncTransactions()`: post-link (`ConnectBankButton`'s
+    `handleSuccess`), the manual "Sync now" button, and sign-in
+    auto-sync (`useAuthStore.ts`'s one-shot, renamed
+    `syncPlaidDataOnceReady` to reflect that it now syncs both
+    transactions and balance as two independent calls, so one failing
+    doesn't block the other). `src/lib/plaidServer.ts` gained a matching
+    `syncBalance()` export. **`IncomeOverview.tsx`'s bank balance field
+    now branches on `hasLinkedBank`**: unlinked users keep the original
+    editable `Input` (`setBankBalance` still exists, untouched); once a
+    bank is linked the field becomes read-only (a plain `formatCurrency`
+    display, labeled "Bank balance (from linked bank)") — a manual edit
+    there would just get silently overwritten by the next sync, so
+    replacing rather than merely supplementing the input was the
+    correct call per the user's explicit "replace" wording. Verified
+    live against the real sandbox account: "Sync now" hit
+    `/api/sync_balance` (`200 OK`), returned a real
+    `{"bankBalance":62569}`, and the UI updated to "$62,569.00" via the
+    existing Firestore listener with no reload — same one-writer
+    pattern every other synced field already uses.
+  - **Enriched synced transaction data — per-account names, more Plaid
+    fields, and the complete raw transaction as a permanent safety net.**
+    User asked what fields Plaid actually sends per transaction; answering
+    that surfaced two real gaps: `syncTransactions.ts` only kept a
+    handful of fields off Plaid's much richer `Transaction` object, and
+    every transaction under one linked Item was tagged with just the
+    institution name, making a checking account and a credit card under
+    the same login indistinguishable in Bank Activity (and `accountName`
+    wasn't even rendered in the UI at all until this pass). Confirmed via
+    `AskUserQuestion` which fields to add, then — after discussing that
+    cursor-based sync means Plaid never re-sends an unmodified
+    transaction, so an uncaptured field is gone for good short of
+    unlinking and relinking — the user asked directly why not just store
+    everything rather than hand-picking fields one at a time. Agreed:
+    Firestore documents are small (a transaction's full JSON is a few KB,
+    nowhere near the 1 MiB/doc limit) and billed per document not per
+    field, so there's no real cost to storing the complete object.
+    - **Per-account names**: `PlaidItemDoc` gained `accounts?:
+      Record<string, PlaidAccountInfo>` (`{name, mask}`, keyed by Plaid's
+      `account_id`) — fetched via a new shared `plaid-server/src/lib/
+      plaidAccounts.ts#fetchAccountsMap` helper, called once at link time
+      (`exchangeToken.ts`, best-effort/non-blocking) and self-healed on
+      the next sync for any item that predates this field
+      (`syncTransactions.ts`'s new `ensureAccounts`, persisted back to
+      the item doc so it only ever runs once per item). `accountName` is
+      now derived as `"{institutionName} {account.name} ...{mask}"` (e.g.
+      "Tartan Bank Plaid Checking ...0000") via a new
+      `deriveAccountName`, falling back to the old institution-only
+      label when no account info is available yet. Rendered in Bank
+      Activity for the first time as a new small line under each row's
+      merchant/date.
+    - **`authorizedDate`/`logoUrl`**: kept as first-class fields (the UI
+      binds to them directly) — `authorizedDate` shown only when it
+      differs from the posted `date` (e.g. "May 27 (authorized May 26)"),
+      `date` itself unchanged as what drives date-range filtering and
+      totals; `logoUrl` rendered as a small icon before the merchant name
+      when present, nothing when absent (no broken-image icon).
+    - **`raw: Transaction`**: the complete Plaid transaction object,
+      stored verbatim on every synced transaction (frontend types it
+      loosely as `Record<string, unknown>` rather than hand-mirroring
+      Plaid's full interface, since the `plaid` npm package isn't
+      installed there and nothing reads a specific sub-field yet) —
+      supersedes needing separate `merchant_entity_id`/`payment_channel`
+      fields, also captures `location`/`payment_meta`/`counterparties`/
+      `iso_currency_code`/etc. with no further hand-picking. Nothing
+      reads it yet; it's the safety net a future feature (e.g.
+      remembering how a merchant was categorized last time, via
+      `merchant_entity_id`) would draw from without needing another
+      backfill.
+    - **Found and fixed a real bug during live verification**: the first
+      live re-sync after this change failed with a `502` — Firestore's
+      Admin SDK throws on an explicit `undefined` field value (no
+      `ignoreUndefinedProperties` configured), and the initial
+      `authorizedDate: transaction.authorized_date ?? undefined`/
+      `logoUrl: transaction.logo_url ?? undefined` pattern put a literal
+      `undefined` key on the write for any transaction missing those
+      fields — common in practice, not a hypothetical edge case (27/48
+      and 21/48 of the real synced transactions this session lacked
+      them, respectively). Fixed by switching to conditional spread
+      (`...(x ? {field: x} : {})`) for every optional field in
+      `buildTransactionDoc`, including the pre-existing
+      `plaidCategoryPrimary` line, which had the identical latent risk
+      and had simply never been exercised against a transaction that
+      actually lacked it.
+    - Also handled Plaid's `removed` array from `transactionsSync`,
+      previously destructured out of the response but never read — a
+      transaction Plaid retracts (e.g. a pending charge that never
+      settled) now gets `batch.delete`d from `plaidTransactions`,
+      unconditionally, in the same batch as the `added`/`modified`
+      writes. Safe even if already categorized: categorizing creates an
+      independent `Purchase`/`Paycheck` that doesn't reference back to
+      the source `PlaidTransaction`, so deleting the raw record only
+      removes it from the Bank Activity log.
+    - **Verified live and via the emulator, not just `tsc`**: connected a
+      real Tartan Bank sandbox item exposing 12 real accounts (checking,
+      savings, CD, credit card, money market, IRA, 401k, student loan,
+      mortgage, HSA, cash management, business credit card); confirmed 5
+      of them had real synced transactions with correctly distinct
+      `accountName`s (e.g. "Tartan Bank Plaid Credit Card ...3333" vs.
+      "Tartan Bank Plaid Checking ...0000" — the actual point of this
+      fix); confirmed 48/48 synced transactions had a complete `raw`
+      blob (verified field-by-field against one sample, including
+      `location`/`payment_channel`/`merchant_entity_id`); confirmed
+      `authorizedDate` rendered only when it genuinely differed and
+      `logoUrl` rendered real merchant icons (United Airlines, Uber) with
+      no broken-image icon on rows lacking one. Confirmed self-healing by
+      clearing an item's `accounts` field directly in the emulator and
+      triggering "Sync now" — all 12 accounts came back with no re-link
+      needed. Confirmed the `removed`-handling invariant by categorizing
+      a real transaction (creating a real `$6.33` Transport `Purchase`),
+      then deleting its `plaidTransactions` doc directly (simulating
+      exactly what the `removed`-handling code does) — confirmed the
+      transaction disappeared from Bank Activity while the `Purchase` and
+      its contribution to that month's Spent total stayed completely
+      untouched. `tsc -b`/`tsc --noEmit`/`lint` all clean throughout.
+  - **Not yet done**: OAuth-flavored sandbox institution testing (needs a
+    configured `redirect_uri`, not exercised), a staging/production
+    deployment of `plaid-server` (and the `VITE_PLAID_SERVER_URL` those
+    environments would need), the `investments` Plaid product
+    (explicitly deferred — `sync_transactions` only handles
+    `transactions` today), and a resolved policy for refund-like
+    transactions (see the categorization-check bullet above).
 
 Not yet implemented: a running tax-reserve balance, itemized deductions/
-credits, filing statuses other than single, a real Plaid connection (Link
-UI, frontend wiring to `plaid-server` — see the `plaid-server` bullet above
-for what's already built server-side), a real AI categorization agent (see
-the Plaid integration prep bullet), Veryfi/Resend integrations, dark-mode
+credits, filing statuses other than single, a real AI categorization
+agent (see the Plaid integration prep bullet), the Plaid `investments`
+product (see the Plaid Link bullet above), a staging/production
+deployment of `plaid-server`, Veryfi/Resend integrations, dark-mode
 toggle (theme is class-based and CSS-ready, but nothing flips the `.dark`
 class yet).
 
@@ -548,10 +785,17 @@ src/
     dashboard/     # Dashboard home components (MoneySummaryRow — the top
                     # always-current-month income/spent/leftover row, owns
                     # `toneClasses`/`PanelTone` for icon tinting;
-                    # LoadDemoDataButton — AlertDialog-confirmed, only shown
-                    # when all 4 collections are empty; SimulateBankSyncButton —
-                    # mirrors LoadDemoDataButton, seeds fake plaidTransactions,
-                    # only shown when that collection is empty)
+                    # ConnectBankButton — the real Plaid Link connect flow
+                    # (SimulateBankSyncButton, the old fake-transaction stand-in
+                    # this superseded, was deleted outright — see the
+                    # 2026-08-05 Session Log entry), branches on
+                    # useBudgetStore's hasLinkedBank to render "Connect a bank"
+                    # (via react-plaid-link's usePlaidLink, see src/lib/plaidServer.ts)
+                    # or "Sync now"; never mutates the store directly, relies on
+                    # the existing users/{uid} Firestore listener. LoadDemoDataButton
+                    # — the old hardcoded-mock-data seeding action — was deleted
+                    # outright once real Plaid sandbox data became this app's
+                    # test-data source, see the 2026-08-05 Session Log entry)
     charts/        # Recharts wrapper components (still empty/future — not the
                     # same as SpendingPieChart, which is real Recharts but
                     # feature-specific so it lives in components/spending/ instead,
@@ -565,12 +809,17 @@ src/
                     # landing destination), sign-in/sign-up mode toggle
   stores/          # Zustand stores, one file per domain, named use<Domain>Store.ts
                     # (useBudgetStore.ts — categories, incomeSources, paychecks,
-                    # purchases, plaidTransactions, bankBalance, paychecksPerMonth,
-                    # now Firestore-synced, see below; categorizeTransactionAsSpending/
-                    # AsIncome — the store actions the Bank activity UI calls to
-                    # categorize a raw Plaid transaction; useAuthStore.ts — user/status/error +
+                    # purchases, plaidTransactions, hasLinkedBank, bankBalance,
+                    # paychecksPerMonth, now Firestore-synced, see below;
+                    # categorizeTransactionAsSpending/AsIncome — the store actions
+                    # the Bank activity UI calls to categorize a raw Plaid
+                    # transaction; useAuthStore.ts — user/status/error +
                     # sign-in/up/out actions, module-level onAuthStateChanged
-                    # listener drives useBudgetStore's sync; useDateFilterStore.ts
+                    # listener drives useBudgetStore's sync AND (once
+                    # useBudgetStore's Firestore listeners report ready)
+                    # syncPlaidTransactionsOnceReady — a one-shot subscribe that
+                    # calls plaidServer.ts's syncTransactions() automatically on
+                    # every sign-in if hasLinkedBank is true; useDateFilterStore.ts
                     # — the single shared mode ('month' | 'year') + startDate/
                     # endDate every page reads/writes (setToMonth/setToYear),
                     # pure in-memory UI state, deliberately NOT Firestore-synced
@@ -583,23 +832,29 @@ src/
                     # getFirestore() — call getFirebaseAuth() only where auth is used).
                     # Also connects to the local Auth/Firestore emulators when
                     # VITE_USE_FIREBASE_EMULATORS=true
+    plaidServer.ts # The app's first external (non-Firebase) REST client — talks
+                    # to plaid-server/, not Firestore. A single plaidFetch<T>()
+                    # helper attaches a fresh Firebase ID token as a Bearer
+                    # header on every call (reads VITE_PLAID_SERVER_URL, optional
+                    # — only .env.local has a real value today); exports
+                    # createLinkToken/exchangePublicToken/syncTransactions,
+                    # matching plaid-server's three routes exactly
     iconMap.ts     # iconMap (Record<string, LucideIcon>) + getIcon() — the
                     # icon-name-to-component lookup Firestore sync hydrates
                     # through; write-path inputs use `iconName: string` instead
                     # of a component reference
-    demoData.ts    # The original hardcoded mock dataset, relocated here verbatim
-                    # — pure data, used only by the "Load demo data" action, never
-                    # by store init (new accounts start empty)
     firestore/
       types.ts     # Firestore document shapes (FirestoreCategoryDoc — fixed |
                     # percentage discriminated union with iconName, not icon —
                     # FirestoreIncomeSourceDoc, FirestorePaycheckDoc,
                     # FirestorePurchaseDoc, FirestorePlaidTransactionDoc,
-                    # FirestoreUserDoc). Every doc type except FirestoreUserDoc
-                    # carries optional createdAt/updatedAt Timestamp fields —
-                    # optional and absent from what callers supply, since
-                    # writes.ts injects them via serverTimestamp() rather than
-                    # any caller constructing one
+                    # FirestoreUserDoc — bankBalance/paychecksPerMonth, both
+                    # client-writable, plus hasLinkedBank, optional and
+                    # server-write-only via plaid-server). Every doc type except
+                    # FirestoreUserDoc carries optional createdAt/updatedAt
+                    # Timestamp fields — optional and absent from what callers
+                    # supply, since writes.ts injects them via serverTimestamp()
+                    # rather than any caller constructing one
       sync.ts       # attachListeners(uid, callbacks) — 6 onSnapshot listeners
                     # (5 subcollections + users/{uid} root doc), converts
                     # iconName → icon via iconMap on the way in, and each
@@ -618,24 +873,25 @@ src/
                     # category/source doc in one writeBatch, so deleting a
                     # category or income source never leaves orphaned
                     # purchase/paycheck records behind pointing at an id that
-                    # no longer exists. writePlaidTransaction — inserts one raw
-                    # synced transaction (only called by plaidDemoData.ts's
-                    # seed today; a real Plaid sync would call this too).
-                    # categorizePlaidTransactionAsSpending/AsIncome — the
-                    # categorization write: one batch creates a real Purchase/
-                    # Paycheck from the transaction's data AND marks the
-                    # transaction resolved (categoryId+purchaseId or
+                    # no longer exists. categorizePlaidTransactionAsSpending/
+                    # AsIncome — the categorization write: one batch creates a
+                    # real Purchase/Paycheck from the transaction's data AND
+                    # marks the transaction resolved (categoryId+purchaseId or
                     # sourceId+paycheckId), so it counts toward real totals and
-                    # is never categorized twice
+                    # is never categorized twice. (writePlaidTransaction — the
+                    # single-doc insert only the now-deleted "Simulate bank
+                    # sync" seed ever called — was removed as dead code once
+                    # that feature was deleted; real synced transactions are
+                    # written server-side by plaid-server instead, via the
+                    # Admin SDK, not through this file at all.)
       users.ts      # ensureUserDoc(uid) — idempotent setDoc(...,{merge:true}),
                     # called on every sign-in so it never clobbers existing
                     # bankBalance/paychecksPerMonth
-      demoData.ts   # loadDemoData(uid) — one writeBatch (~40 writes) seeding
-                    # demoData.ts's dataset into a user's own Firestore docs
-      plaidDemoData.ts # simulateBankSync(uid) — one writeBatch seeding
-                    # src/lib/plaidDemoData.ts's ~10 fake, deliberately
-                    # all-uncategorized transactions; stands in for a real
-                    # Plaid transactions-sync webhook (see functions/src/index.ts)
+                    # (demoData.ts, the hardcoded-mock-data seeder, and
+                    # plaidDemoData.ts, the "Simulate bank sync" seed, were
+                    # both deleted once real Plaid sandbox data superseded
+                    # them as this app's test-data source — see the
+                    # 2026-08-05 Session Log entry)
     tax/
       brackets.ts  # Pure data: FEDERAL_BRACKETS_2026, CA_BRACKETS_2025, standard
                     # deductions, SE tax/QBI/SDI constants, each labeled with its
@@ -657,30 +913,48 @@ src/
                     # getTargetForMode(monthlyTarget, mode) — scales a category's
                     # monthly-rate target to the shared filter's mode (exact for
                     # 'month', ×12 for 'year')
-    income.ts      # derived income helpers (getIncomeInRange/getPaychecksInRange —
-                    # replaced the old always-"this month" getMonthlyIncome/
-                    # getCurrentMonthPaychecks with range-based versions;
+    income.ts      # derived income helpers (getPaychecksInRange — real Paycheck
+                    # docs only, unchanged, still what src/lib/tax/ and
+                    # per-source figures go through; getIncomeInRange — total
+                    # income for the range including every real transaction
+                    # regardless of categorization: every Paycheck plus every
+                    # synced Plaid transaction that's income-type but not yet
+                    # categorized (isPlaidTransactionCategorized false),
+                    # guarded against double-counting since a categorized
+                    # transaction already has a corresponding Paycheck;
                     # getMonthlyIncomeEquivalent — the implied MONTHLY rate for
-                    # whatever the filter is set to, what getMonthlyTarget's
+                    # whatever the filter is set to (now also plaidTransactions-
+                    # aware via getIncomeInRange), what getMonthlyTarget's
                     # percentage-of-income categories resolve against regardless
                     # of mode; getAveragePaycheckAmount, getMonthlyTarget —
                     # resolves a BudgetCategory's dollar target from income
                     # context; getSourcePaychecks/getSourceIncomeInRange — a
                     # single IncomeSource's paychecks/total for the selected
-                    # range; getLeftoverCash — range income minus getTotalSpent,
+                    # range, deliberately still paycheck-only since an
+                    # uncategorized transaction has no source to attribute it
+                    # to; getLeftoverCash — range income minus getTotalSpent,
                     # the dashboard's "money left over" figure, deliberately named
                     # and kept distinct from the unrelated "remaining budget"
                     # (budgeted-minus-spent) concept used on the Budget tab;
                     # getAnnualizedIncomeByType — the selected range's income
                     # annualized via `annualize` and split by each source's
                     # incomeType into {w2, selfEmployed}, the one integration
-                    # point src/lib/tax/ uses)
+                    # point src/lib/tax/ uses — deliberately built on
+                    # getPaychecksInRange, not getIncomeInRange, so an
+                    # uncategorized transaction with no known incomeType is
+                    # never silently guessed into a tax bucket)
     purchases.ts   # derived spending helpers (getCategoryPurchases, getCategorySpent) —
                     # a category's spend is summed from Purchase records filtered to
-                    # the shared date filter's selected range, never stored directly
-    spending.ts    # getTotalSpent — sums getCategorySpent across every category for
-                    # a total-spend view; no new state, just a different lens on the
-                    # same Purchase records purchases.ts already derives from
+                    # the shared date filter's selected range, never stored directly;
+                    # deliberately still purchase-only (mirrors getSourceIncomeInRange's
+                    # reasoning) since a category-level figure has nothing to attribute
+                    # an uncategorized transaction to
+    spending.ts    # getTotalSpent — total spend for the range including every real
+                    # transaction regardless of categorization: every Purchase (summed
+                    # directly, not per-category — a Purchase always carries a valid
+                    # categoryId so the two are equivalent) plus every synced Plaid
+                    # transaction that's spending-type but not yet categorized, with
+                    # the same double-count guard getIncomeInRange uses
     period.ts      # DateRange ({start, end}), DateFilterMode ('month' | 'year'),
                     # isDateInRange, monthBounds/yearBounds — the shared date
                     # filter's core date math. annualize(amountInRange, mode) —
@@ -726,11 +1000,16 @@ src/
     paycheck.ts    # Paycheck (id, amount, date as ISO "YYYY-MM-DD" string, sourceId
                     # referencing an IncomeSource)
     purchase.ts    # Purchase (id, categoryId, date, description, amount)
-    plaidTransaction.ts # PlaidTransaction (id, accountName, amount, date,
-                    # merchantName, plaidCategory, transactionType: 'spending' |
-                    # 'income' | 'transfer', pending, optional categoryId+
-                    # purchaseId or sourceId+paycheckId once categorized) — a raw
-                    # bank transaction synced from Plaid, distinct from
+    plaidTransaction.ts # PlaidTransaction (id, accountName — now per-account,
+                    # e.g. "Tartan Bank Plaid Checking ...0000", not just the
+                    # institution — amount, date, authorizedDate, merchantName,
+                    # logoUrl, plaidCategory, transactionType: 'spending' |
+                    # 'income' | 'transfer', pending, raw — the complete Plaid
+                    # transaction object, kept because cursor sync means an
+                    # uncaptured field on an unmodified transaction is gone
+                    # for good — optional categoryId+purchaseId or
+                    # sourceId+paycheckId once categorized) — a raw bank
+                    # transaction synced from Plaid, distinct from
                     # Purchase/Paycheck; isPlaidTransactionCategorized() helper
   vite-env.d.ts    # ImportMetaEnv typing for VITE_FIREBASE_*/VITE_USE_FIREBASE_EMULATORS vars
 
@@ -750,15 +1029,25 @@ plaid-server/       # Standalone Express + TypeScript backend for real Plaid
                     # API calls — deliberately NOT a Firebase Cloud Function
                     # (Spark plan can't make outbound 3rd-party calls; Secret
                     # Manager needs Blaze) — own package.json/tsconfig.json,
-                    # plain `.env` (gitignored) for PLAID_CLIENT_ID/SECRET/ENV,
-                    # `npm run dev` via `tsx watch`. See the `plaid-server`
+                    # plain `.env` (gitignored) for PLAID_CLIENT_ID/SECRET/ENV
+                    # + USE_FIREBASE_EMULATORS, `npm run dev` via `tsx watch`
+                    # (or the root's `npm run dev:all`, which now also starts
+                    # the Firebase emulators alongside frontend + plaid-server).
+                    # See the `plaid-server`
                     # bullet in CLAUDE.md's Current Status for the full design
                     # (pull-based cursor sync, requireAuth trust model, why
                     # this supersedes functions/'s plaidWebhook stub).
   src/env.ts         # Loads/validates all required env vars up front (fails
-                    # fast with a clear message if .env is incomplete)
-  src/firebaseAdmin.ts # initializeApp() via applicationDefault() (reads
-                    # GOOGLE_APPLICATION_CREDENTIALS), exports auth/db
+                    # fast with a clear message if .env is incomplete).
+                    # USE_FIREBASE_EMULATORS ("true" in local .env) makes
+                    # GOOGLE_APPLICATION_CREDENTIALS optional — the emulators
+                    # don't check credentials at all
+  src/firebaseAdmin.ts # initializeApp() — two paths based on env.useFirebaseEmulators:
+                    # emulator mode sets FIREBASE_AUTH_EMULATOR_HOST/
+                    # FIRESTORE_EMULATOR_HOST (127.0.0.1:9099/8080) and skips
+                    # credentials entirely; production mode uses
+                    # applicationDefault() (reads GOOGLE_APPLICATION_CREDENTIALS).
+                    # Exports auth/db either way
   src/plaidClient.ts # PlaidApi client constructed from PLAID_CLIENT_ID/
                     # SECRET/ENV
   src/middleware/requireAuth.ts # Verifies the Firebase ID token on every
@@ -768,13 +1057,71 @@ plaid-server/       # Standalone Express + TypeScript backend for real Plaid
   src/routes/linkToken.ts       # POST /api/create_link_token
   src/routes/exchangeToken.ts   # POST /api/exchange_public_token — stores
                     # the resulting access_token in users/{uid}/plaidItems
+                    # AND writes hasLinkedBank: true to the users/{uid} root
+                    # doc (UserDocPlaidFields), both in a single db.batch().
+                    # Also fetches per-account names/masks via
+                    # lib/plaidAccounts.ts#fetchAccountsMap (best-effort,
+                    # non-blocking — syncTransactions.ts self-heals if this
+                    # fails or predates the field) and includes them on the
+                    # PlaidItemDoc write
+  src/lib/plaidAccounts.ts # fetchAccountsMap(accessToken) — calls Plaid's
+                    # accountsGet and builds an account_id -> {name, mask}
+                    # map. Shared by exchangeToken.ts (at link time) and
+                    # syncTransactions.ts (self-healing backfill), so the
+                    # two never duplicate this logic
   src/routes/syncTransactions.ts # POST /api/sync_transactions — cursor-based
                     # pull sync (transactionsSync), writes into the same
-                    # users/{uid}/plaidTransactions shape the frontend uses
+                    # users/{uid}/plaidTransactions shape the frontend uses.
+                    # deriveTransactionType checks personal_finance_category
+                    # (explicit INCOME/TRANSFER_IN/TRANSFER_OUT branches)
+                    # before falling back to the amount-sign heuristic;
+                    # deriveAccountName resolves account_id through
+                    # item.accounts (fetched at link time, or self-healed
+                    # here via ensureAccounts for items that predate that
+                    # field) so transactions from different accounts under
+                    # one institution are distinguishable, e.g. "Tartan Bank
+                    # Plaid Checking ...0000" vs "...Plaid Credit Card
+                    # ...3333" — falls back to the old institution-only
+                    # label when no account info is available yet;
+                    # buildTransactionDoc (shared by the added/modified write
+                    # loops) also saves plaidCategoryPrimary (Plaid's coarse
+                    # ~16-value bucket) alongside the existing granular
+                    # plaidCategory, authorizedDate/logoUrl (first-class,
+                    # UI-bound), and raw (the complete Plaid Transaction
+                    # object, verbatim — see FirestorePlaidTransactionDoc.raw
+                    # in types.ts for why). Every optional field is added via
+                    # conditional spread, not `field: x ?? undefined` —
+                    # Firestore's Admin SDK throws on an explicit undefined
+                    # value, found the hard way when the initial
+                    # authorizedDate/logoUrl code shipped with exactly that
+                    # bug. Also destructures `removed` from the sync
+                    # response (previously ignored) and batch.deletes those
+                    # transaction docs unconditionally — safe even if
+                    # already categorized, since categorizing creates an
+                    # independent Purchase/Paycheck that doesn't reference
+                    # back to the source PlaidTransaction
+  src/routes/syncBalance.ts # POST /api/sync_balance — calls Plaid's
+                    # accountsBalanceGet (real-time, not the cached
+                    # accountsGet) per linked item, sums `available` (falls
+                    # back to `current`) across depository-type accounts
+                    # only, writes the total to users/{uid}.bankBalance —
+                    # the same field the frontend's old manual entry used
   src/types.ts       # Local copy of FirestorePlaidTransactionDoc (kept in
                     # sync by hand with src/lib/firestore/types.ts, same
-                    # reasoning functions/ already keeps its own copies) +
-                    # PlaidItemDoc (accessToken/cursor, server-only)
+                    # reasoning functions/ already keeps its own copies, now
+                    # including authorizedDate/logoUrl and raw — the complete
+                    # Plaid Transaction object, imported straight from the
+                    # `plaid` package rather than hand-typed, since this
+                    # server already has it) + PlaidAccountInfo ({name, mask})
+                    # + PlaidItemDoc (accessToken/cursor, server-only, now
+                    # also accounts?: Record<accountId, PlaidAccountInfo> —
+                    # fetched once via lib/plaidAccounts.ts, self-healed if
+                    # missing) + UserDocPlaidFields
+                    # (hasLinkedBank — the narrow slice of FirestoreUserDoc
+                    # this server ever writes; bankBalance writes go through
+                    # a plain object literal in syncBalance.ts itself, not
+                    # this type, since it's the one field plaid-server and
+                    # the frontend's writeUserFields both legitimately write)
 ```
 
 Conventions:
@@ -2656,3 +3003,292 @@ unique findings, not the standard checklist.
   after the removal (confirming `categorizeTransaction` alone still
   compiles with no leftover references to the deleted `plaidWebhook`/
   `defineSecret` code).
+
+### 2026-08-05 — Real Plaid Link connect flow, sandbox-verified end-to-end
+- User asked to start planning Plaid Link + sandbox account setup. Used
+  the Explore/Plan agent workflow (plan mode) before writing any code:
+  confirmed the frontend has zero existing pattern for calling an
+  external REST API (this is the first), confirmed `useAuthStore` has no
+  ID-token helper yet, and confirmed the data layer (`useBudgetStore.
+  plaidTransactions`, `categorizeTransactionAsSpending`/`AsIncome`) is
+  already fully wired to consume whatever `plaid-server`'s
+  `sync_transactions` writes — meaning this was purely a "connect the
+  pipes" task, not new data-layer work.
+- **Three design decisions confirmed via `AskUserQuestion` before
+  building**: (1) add a `hasLinkedBank` boolean on the user's Firestore
+  root doc, written server-side by `plaid-server` only, so the UI can
+  show "Connect a bank" vs. "Sync now" — the `plaidItems` collection
+  itself stays permanently unreadable by the client, by design, so this
+  flag is the only channel for that state. (2) Add a manual "Sync now"
+  button alongside the connect flow. (3) Sync happens immediately after a
+  successful link (chained into the same `onSuccess` callback), not
+  deferred to next sign-in.
+- **A fourth decision came from the user directly questioning the plan
+  mid-review**: asked "do you mean the user has to re-sync after every
+  sign-in?" — correctly caught that the original plan only synced once,
+  right after linking, with no ongoing trigger. Added automatic
+  sync-on-every-sign-in as a result, hooked into `useAuthStore.ts`'s
+  existing `onAuthStateChanged` listener via a new
+  `syncPlaidTransactionsOnceReady(uid)` — a one-shot
+  `useBudgetStore.subscribe` that waits for `loading` to flip false
+  (since `hasLinkedBank` isn't hydrated synchronously) before checking
+  the flag and calling `syncTransactions()`.
+- Built `src/lib/plaidServer.ts` (the app's first external REST client —
+  a single `plaidFetch<T>()` helper attaching a fresh Firebase ID token
+  as `Authorization: Bearer`), `src/components/dashboard/
+  ConnectBankButton.tsx` (branches on `hasLinkedBank`; the `!hasLinkedBank`
+  path mounts a small `PlaidLinkLauncher` child component specifically so
+  `usePlaidLink`'s hook rules are respected — hooks can't be called
+  conditionally, so "fetch a token, then open Link" has to be sequenced
+  via mount/unmount rather than an if-branch inside one component), the
+  `hasLinkedBank` plumbing across `src/lib/firestore/types.ts`/`sync.ts`/
+  `useBudgetStore.ts`, and `plaid-server/src/routes/exchangeToken.ts`'s
+  now-batched write of both the `PlaidItemDoc` and the new
+  `UserDocPlaidFields` flag.
+- Installed `react-plaid-link@^5` (confirmed via `npm view` — its peer
+  deps cover React 16–19, no version conflict with this app's pinned
+  React 18).
+- **Live sandbox verification surfaced a real gap, not just a smoke
+  test**: the first real "Connect a bank" attempt got a `401` from
+  `create_link_token` — `plaid-server`'s Admin SDK was verifying the
+  frontend's ID token against *production* Firebase, while the frontend
+  was signed in via the local Auth emulator (a mismatch this session's
+  earlier `plaid-server` work never had to confront, since nothing had
+  actually called `requireAuth` against emulator-issued tokens until
+  now). Fixed by adding real Firebase-emulator support to `plaid-server`
+  itself for the first time: a new `USE_FIREBASE_EMULATORS` env var that,
+  when true, points the Admin SDK at `127.0.0.1:9099`/`127.0.0.1:8080`
+  instead of production and skips `GOOGLE_APPLICATION_CREDENTIALS`
+  entirely (the emulators don't check credentials) — this is also what
+  unblocked testing without ever having to generate a real downloaded
+  service account key.
+- **User also asked for `npm run dev:all` to start the Firebase emulators
+  too** — added a third `concurrently` process, so one command now boots
+  the entire local stack (frontend + `plaid-server` + emulators).
+- **Verified genuinely end-to-end against Plaid's real sandbox, not
+  mocked**: clicked "Connect a bank," completed Plaid Link's actual
+  hosted flow (phone verification with Plaid's sandbox-mode-displayed
+  test code, institution picker, "Tartan Bank," account confirmation),
+  and confirmed a real `200 OK` chain through `create_link_token` →
+  `exchange_public_token` → `sync_transactions` (48 real sandbox
+  transactions on first link, toast confirmed the count). Confirmed
+  `hasLinkedBank` round-tripped through Firestore correctly — the header
+  button swapped from "Connect a bank" to "Sync now" with no page
+  reload, proving the Firestore-listener-not-manual-store-mutation design
+  actually works. Confirmed real transactions (Starbucks, Uber, United
+  Airlines, etc., with Plaid's own `personal_finance_category` strings)
+  rendered correctly in the existing Bank Activity UI and could be
+  categorized exactly like the fake "Simulate bank sync" data — categorized
+  a $500 "Tectra Inc" transaction as Rent and confirmed it flowed into
+  that month's real Spent total ($500.00), proving the "categorizing
+  creates a real Purchase" design holds for genuinely Plaid-sourced data,
+  not just the hand-written demo fixtures it was originally tested
+  against. Confirmed clicking "Sync now" again was correctly idempotent
+  (`syncedCount: 0`, no duplicate transactions). Confirmed dark mode
+  renders the new button correctly in both states (manually toggling the
+  `.dark` class, since this app still has no real dark-mode toggle UI).
+- **One non-obvious debugging note**: the 48 real sandbox transactions
+  didn't initially appear anywhere in the UI after a successful sync,
+  which looked like a bug at first. Root cause: Plaid's sandbox seeds
+  transaction dates relative to *its own* real-world clock, landing them
+  in May–July 2026, while the shared date filter defaulted to the
+  current month (August 2026) — zero overlap, so `SpendingBankActivity`'s
+  empty-when-nothing-in-range behavior correctly rendered nothing. Not a
+  bug; confirmed by querying the synced documents directly via a
+  throwaway Admin SDK script against the emulator (`earliest: 2026-05-09,
+  latest: 2026-07-28`), then switching the date filter to July and
+  confirming all 12 of that month's transactions rendered correctly.
+- **Known, harmless, unfixed quirk found during testing**: `onAuthStateChanged`
+  fired twice for one sign-in (two `sync_transactions` calls ~14ms apart
+  in the network log) — a known Firebase Auth SDK behavior, not a bug in
+  the code written this session. Harmless because the sync is cursor-based
+  and idempotent; not worth adding dedupe complexity for.
+- Verified: `npx tsc -b` (app) and `npx tsc --noEmit` (`plaid-server`)
+  both clean after every change, including the mid-session
+  `USE_FIREBASE_EMULATORS` fix (confirmed `plaid-server`'s `tsx watch`
+  picked up the change live without a restart — the retried request
+  after the fix returned `200 OK`).
+- Not yet done, by explicit scope: OAuth-flavored sandbox institution
+  testing (needs a configured `redirect_uri`), a staging/production
+  deployment of `plaid-server` (and the `VITE_PLAID_SERVER_URL` those
+  environments would need), and the `investments` Plaid product
+  (mentioned by the user as a future goal, deliberately deferred —
+  `sync_transactions` only requests/handles `transactions` today).
+- **Deleted "Simulate bank sync" outright**, once real Plaid data was
+  confirmed working end-to-end. User asked directly why the app was still
+  using fake demo data instead of the real sandbox account it now has —
+  correctly pointed out the original reason `SimulateBankSyncButton`
+  existed (no real Plaid connection yet) no longer applied, matching this
+  file's own established precedent of deleting fully-superseded code
+  outright rather than leaving it as unused fallback scaffolding
+  (`MoneyOverviewCard`, `DashboardPanel`, `checkPeriodResets`/`periodStart`,
+  `plaidWebhook` were all handled the same way earlier in this project).
+  Removed `src/components/dashboard/SimulateBankSyncButton.tsx`,
+  `src/lib/plaidDemoData.ts` (the fake transaction data), and
+  `src/lib/firestore/plaidDemoData.ts` (the batch seeder) — plus
+  `writePlaidTransaction` in `src/lib/firestore/writes.ts`, found to be
+  genuinely dead code once traced (only ever called by the deleted seed;
+  real synced transactions are written server-side by `plaid-server`
+  instead, never through this frontend function) and its now-unused
+  `FirestorePlaidTransactionDoc` import. Updated `HomePage.tsx` to drop
+  the import/render. Verified via the live dev server (not just `tsc`)
+  that "Simulate bank sync" is gone from the header entirely, not merely
+  hidden — confirmed `tsc -b`/`lint`/`build` all clean after the removal.
+- **Explicit categorization check + a new `plaidCategoryPrimary` field**.
+  User asked "how are you classifying purchases from income" — answering
+  that surfaced that `INCOME` wasn't checked explicitly (only inferred
+  via amount sign), which the user then asked to fix directly: "make
+  sure it is classified as income" if Plaid's own category says so.
+  Added the explicit `personal_finance_category.primary === 'INCOME'`
+  check to `deriveTransactionType` (checked first, before the
+  `TRANSFER_IN`/`TRANSFER_OUT` check, before the sign-based fallback) —
+  see the full reasoning and code in the Plaid Link bullet above. Also
+  added `plaidCategoryPrimary` (Plaid's coarse ~16-value bucket) to every
+  synced transaction, across `src/types/plaidTransaction.ts`,
+  `src/lib/firestore/types.ts`, `src/lib/firestore/sync.ts`, and
+  `plaid-server/src/types.ts` — explicitly for a future auto-sort-into-
+  budget-categories feature, per the user's own stated reasoning, kept
+  separate from the existing granular `plaidCategory`. Refactored
+  `syncTransactions.ts` to extract a shared `buildTransactionDoc` helper
+  (typed against Plaid SDK's real `Transaction` type) rather than
+  duplicating the construction across the `added`/`modified` write loops.
+- **Verified the categorization field live, not just type-checked**:
+  wrote two temporary Admin SDK scripts (`reset-cursor.mjs` to force a
+  full re-sync by clearing the stored Plaid cursor, `check-categories.mjs`
+  to query and print every synced transaction's classification), ran
+  them against the emulator, confirmed all 48 real synced sandbox
+  transactions had `plaidCategoryPrimary` populated (0 missing), then
+  deleted both scripts — never committed, matching this file's
+  established "throwaway verification script, not kept" convention.
+- **Found and honestly reported, rather than silently fixed, a real
+  classification edge case**: 3 real "United Airlines" sandbox
+  transactions (category `TRAVEL`, negative amount) were classified
+  `'income'` by the sign-based fallback — almost certainly a simulated
+  flight refund, which Plaid's category taxonomy has no way to
+  distinguish from genuine income. Explicitly did not build a fix (e.g.
+  a separate `'refund'` type) and instead asked the user how they'd want
+  it handled — a product decision, not an obvious bug, and one the user
+  has not yet answered as of this entry.
+- **Answered "are we retrieving money spent, money earned, and bank
+  balance from Plaid"**: confirmed via `grep` that spent/earned were
+  (through `transactions/sync`, classified) but bank balance was **not**
+  — it was still the original, fully manual, editable `bankBalance`
+  field, completely disconnected from Plaid. User then explicitly asked
+  to pull the real balance and **replace** the manual field with it, not
+  just add it alongside — see the new balance-sync bullet in the Plaid
+  Link section above (`sync_balance` route, `IncomeOverview.tsx`
+  branching on `hasLinkedBank`) for the full implementation, verified
+  live against the real sandbox account (`{"bankBalance":62569}` synced
+  and rendered correctly with no reload).
+- **Deleted "Load demo data" outright**, once the balance-sync work above
+  meant real Plaid sandbox data now covers every axis (transactions,
+  classification, and balance) this feature used to stand in for. User
+  asked directly to rely solely on Plaid data as this app's test-data
+  source — same "delete once fully superseded" precedent already applied
+  to `SimulateBankSyncButton`/`plaidDemoData.ts` earlier this session (and
+  to `MoneyOverviewCard`/`DashboardPanel`/`checkPeriodResets` before that).
+  Removed `src/components/dashboard/LoadDemoDataButton.tsx`,
+  `src/lib/demoData.ts` (the hardcoded mock dataset — 9 categories, 5
+  income sources, 6 paychecks, ~19 purchases), and
+  `src/lib/firestore/demoData.ts` (the `loadDemoData` batch writer);
+  updated `HomePage.tsx` to drop the import/render. Confirmed via `grep`
+  across `src/` that nothing else referenced any of the three beyond one
+  harmless doc comment in `writes.ts` (describing `deleteCategory`'s batch
+  pattern as "mirroring" `demoData.ts`'s — left as-is, since the pattern
+  description is still accurate even though the file it points to is
+  gone). Note: deleting the *seeding feature* doesn't retroactively wipe
+  data an account already seeded with it — any account that had already
+  clicked "Load demo data" keeps that data in Firestore until manually
+  removed; only the ability to seed *new* demo data going forward is
+  gone. Verified via the live dev server that the button is gone from the
+  header (only "Sync now"/"Sign out" remain) and the app still renders
+  correctly against already-seeded data with no console errors beyond the
+  pre-existing stale-HMR noise from this session's earlier file deletions
+  (a long-running dev server holding a stale module-graph reference to a
+  deleted file — cosmetic, clears on a full dev-server restart, not
+  investigated further). `tsc -b`/`lint` both clean after the removal.
+- **"Monthly/Yearly Spent" and "Earned"/income totals now count every real
+  transaction, not just categorized ones.** User asked directly: spending
+  totals should reflect transactions "no matter if they are part of a
+  budget category or not," then "Same with Income" for the mirrored
+  income figures. Before this, `getTotalSpent`/`getIncomeInRange` only
+  summed `Purchase`/`Paycheck` docs — meaning a real Plaid transaction sat
+  in "Bank activity" as a genuine debit/credit against the account but
+  didn't count toward "Monthly Spent" or "Earned this month" until someone
+  clicked "Categorize…". Given the whole point of this session's earlier
+  work was making Plaid the sole source of test data, that gap meant the
+  headline totals could understate reality by exactly however much sat
+  uncategorized.
+- Rewrote both functions around the same design: sum every `Purchase`/
+  `Paycheck` (unchanged — these already count whether manually entered or
+  created by categorizing a transaction) **plus** every synced
+  `PlaidTransaction` of the matching type (`spending`/`income`) that's
+  **not yet categorized** (`!isPlaidTransactionCategorized(t)`). The
+  not-yet-categorized guard is what prevents double-counting — the moment
+  a transaction is categorized it already has a corresponding Purchase/
+  Paycheck being summed in the first half, so it can't be counted twice.
+  `getTotalSpent` (`src/lib/spending.ts`) also dropped its `categories`
+  parameter entirely and now sums `purchases` directly rather than
+  iterating per-category and totaling — mathematically identical (every
+  `Purchase.categoryId` is required and cascading category-delete
+  guarantees no orphans) but simpler and no longer needs the categories
+  array at all.
+- **Deliberately did NOT touch three things that looked like natural
+  extensions but weren't asked for and would have been the wrong call**:
+  (1) `getSourceIncomeInRange`/`getCategorySpent` (the per-source/
+  per-category breakdown figures behind `IncomeSourcesPieChart`/
+  `SpendingPieChart`/`CategoryBreakdownBar`) stay paycheck/purchase-only,
+  since an uncategorized transaction has no source or category to
+  attribute it to — this means those breakdowns' segments can now sum to
+  *less* than the new, larger total, which shows up as an implicit gap
+  (a partial pie / a stacked bar that doesn't reach 100%) rather than a
+  bug; confirmed this renders fine, not broken, during verification. (2)
+  `getAnnualizedIncomeByType` (`src/lib/tax/`'s one integration point)
+  was deliberately left built on `getPaychecksInRange`, not the new
+  `getIncomeInRange` — an uncategorized transaction has no known
+  `incomeType`, and silently guessing W-2 vs. self-employment for real
+  tax-liability math would be a materially different kind of risk than a
+  display total being a little low, so the tax module keeps seeing only
+  income that's actually been attributed to a source. (3) Pending Plaid
+  transactions are still counted (no `pending` filter added) — matching
+  how "Bank activity" already treated them, not a new decision.
+  `getMonthlyIncomeEquivalent` (feeds percentage-of-income budget
+  targets) and `getLeftoverCash` both now flow through the updated
+  `getIncomeInRange`/`getTotalSpent`, so a budget category's dollar
+  target and the dashboard's "Left over" figure both reflect the fuller
+  totals too — consistent with the "one shared helper every screen goes
+  through" convention already established for `annualize`.
+- Updated every call site to pass `plaidTransactions` from
+  `useBudgetStore`: `MoneySummaryRow`, `SpendingSummary`, `BudgetSummary`,
+  `BudgetContent`, `IncomeOverview`, `IncomeSummary`, `IncomeContent`.
+- **Verified against seeded emulator data, not just `tsc`**: since the
+  emulator has no persistence and this session's earlier process cleanup
+  had already wiped any prior local test account, signed up a fresh
+  account and used a throwaway Admin SDK script (`plaid-server/
+  verify-totals.mjs`, deleted after use — same established
+  temporary-verification-script convention as `reset-cursor.mjs`/
+  `check-categories.mjs` earlier this session) to seed: one categorized
+  purchase ($100, in a $500 Groceries category), one categorized paycheck
+  ($1,000, W-2 Job), one uncategorized spending transaction ($42.50), one
+  uncategorized income transaction ($77.25), and one transfer transaction
+  ($500, to confirm it's excluded from both totals). Confirmed via the
+  live UI: "Spent this month" showed exactly $142.50 (100 + 42.50),
+  "Income this month" showed exactly $1,077.25 (1000 + 77.25), "Left
+  over" was their exact difference, "Yearly Spent" was exactly $142.50 ×
+  12, the Groceries category breakdown correctly showed 70.2% (leaving an
+  unfilled ~30% gap for the uncategorized spending) rather than
+  100%/breaking, the Income breakdown correctly showed W-2 Job at 92.8%
+  with the same kind of gap, the $500 transfer appeared in neither total,
+  and both uncategorized transactions still showed up correctly in "Bank
+  activity" with their "Categorize…" control intact. `tsc -b`/`lint` both
+  clean.
+- **Process hygiene note following up on this session's earlier port-
+  conflict incident**: needed the full local stack (frontend + plaid-
+  server + Firebase emulators) running to seed/verify against real
+  Plaid-shaped data, so started all three myself this time — and,
+  learning from earlier in this session where a similar setup was left
+  running and blocked the user's own `npm run dev:all`, explicitly
+  stopped all three (`preview_stop` for the frontend, `taskkill` for
+  plaid-server and the emulator process) once verification finished,
+  confirmed via `netstat` that every relevant port (5173/8090/9099/8080)
+  was free again before ending the turn.

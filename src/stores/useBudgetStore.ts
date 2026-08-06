@@ -39,6 +39,11 @@ interface BudgetState {
   // dollar target for "percentage of paycheck" budgets even before all of
   // this month's paychecks have actually been logged.
   paychecksPerMonth: number
+  // True once the user has completed a real Plaid Link connection — drives
+  // ConnectBankButton's "Connect a bank" vs "Sync now" branch, and gates
+  // the sign-in auto-sync in useAuthStore.ts. Set server-side only, by
+  // plaid-server (see FirestoreUserDoc.hasLinkedBank).
+  hasLinkedBank: boolean
   // True until every Firestore collection for the signed-in user has
   // reported at least one snapshot. False (and all fields back to their
   // empty defaults) while signed out.
@@ -81,6 +86,7 @@ const emptyState = {
   plaidTransactions: [] as PlaidTransaction[],
   bankBalance: 0,
   paychecksPerMonth: 2,
+  hasLinkedBank: false,
 }
 
 // Kept outside the Zustand state itself (unsubscribe functions aren't
@@ -199,6 +205,7 @@ export const useBudgetStore = create<BudgetState>((set) => ({
         set({
           bankBalance: data.bankBalance,
           paychecksPerMonth: data.paychecksPerMonth,
+          hasLinkedBank: data.hasLinkedBank ?? false,
         }),
       onReady: () => set({ loading: false }),
     })

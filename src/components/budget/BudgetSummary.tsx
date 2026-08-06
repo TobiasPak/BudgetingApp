@@ -36,11 +36,17 @@ export function BudgetSummary({ mode, range }: BudgetSummaryProps) {
   const categories = useBudgetStore((state) => state.categories)
   const paychecks = useBudgetStore((state) => state.paychecks)
   const purchases = useBudgetStore((state) => state.purchases)
+  const plaidTransactions = useBudgetStore((state) => state.plaidTransactions)
   const paychecksPerMonth = useBudgetStore((state) => state.paychecksPerMonth)
 
   const [selectedMetric, setSelectedMetric] = useState<BudgetMetric>('income')
 
-  const monthlyIncomeEquivalent = getMonthlyIncomeEquivalent(paychecks, mode, range)
+  const monthlyIncomeEquivalent = getMonthlyIncomeEquivalent(
+    paychecks,
+    plaidTransactions,
+    mode,
+    range
+  )
   const averagePaycheckAmount = getAveragePaycheckAmount(paychecks)
   const targetContext = {
     monthlyIncome: monthlyIncomeEquivalent,
@@ -54,12 +60,12 @@ export function BudgetSummary({ mode, range }: BudgetSummaryProps) {
   // (unchanged behavior from before this filter had a year mode at all), or
   // a monthly average while viewing a whole year — avoids a 3rd card that
   // would otherwise just repeat the 2nd card's number when mode is 'year'.
-  const windowIncome = getIncomeInRange(paychecks, range)
+  const windowIncome = getIncomeInRange(paychecks, plaidTransactions, range)
   const windowBudgeted = categories.reduce(
     (sum, c) => sum + getTargetForMode(getMonthlyTarget(c, targetContext), mode),
     0
   )
-  const windowSpent = getTotalSpent(categories, purchases, range)
+  const windowSpent = getTotalSpent(purchases, plaidTransactions, range)
 
   const annualBudgeted = annualize(windowBudgeted, mode)
   const annualSpent = annualize(windowSpent, mode)

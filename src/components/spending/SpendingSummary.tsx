@@ -27,10 +27,11 @@ function selectableCardClass(isSelected: boolean): string {
 export function SpendingSummary({ mode, range }: SpendingSummaryProps) {
   const categories = useBudgetStore((state) => state.categories)
   const purchases = useBudgetStore((state) => state.purchases)
+  const plaidTransactions = useBudgetStore((state) => state.plaidTransactions)
 
   const [selectedMetric, setSelectedMetric] = useState<SpendingMetric>('window')
 
-  const windowSpent = getTotalSpent(categories, purchases, range)
+  const windowSpent = getTotalSpent(purchases, plaidTransactions, range)
   // Complementary granularity, same pattern as BudgetSummary/IncomeSummary:
   // an annual projection while viewing a month, a monthly average while
   // viewing a whole year.
