@@ -49,6 +49,7 @@ function categoryDocToCategory(id: string, data: FirestoreCategoryDoc): BudgetCa
     color: data.color,
     isCustom: data.isCustom,
     resetDay: data.resetDay,
+    autoCategorizeBuckets: data.autoCategorizeBuckets,
     createdAt: timestampToIso(data.createdAt),
     updatedAt: timestampToIso(data.updatedAt),
   }
@@ -70,6 +71,7 @@ function incomeSourceDocToSource(id: string, data: FirestoreIncomeSourceDoc): In
     // silently understating it (missing SE tax entirely). The former is the
     // safer failure mode for a tax estimate.
     incomeType: data.incomeType ?? 'selfEmployed',
+    autoCategorizeBuckets: data.autoCategorizeBuckets,
     createdAt: timestampToIso(data.createdAt),
     updatedAt: timestampToIso(data.updatedAt),
   }

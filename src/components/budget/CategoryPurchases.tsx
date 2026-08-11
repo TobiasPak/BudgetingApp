@@ -1,7 +1,7 @@
-import { useEffect } from 'react'
+import { useEffect, useState } from 'react'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
-import { Trash2 } from 'lucide-react'
+import { Pencil, Trash2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -16,12 +16,72 @@ import {
   AlertDialogTitle,
   AlertDialogTrigger,
 } from '@/components/ui/alert-dialog'
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from '@/components/ui/dialog'
 import { useBudgetStore } from '@/stores/useBudgetStore'
 import { getCategoryPurchases } from '@/lib/purchases'
 import { defaultDateForRange, type DateRange } from '@/lib/period'
 import { addPurchaseSchema, type AddPurchaseInput } from '@/lib/schemas/budget'
 import { formatCurrency } from '@/lib/utils'
+import { PlaidCategoryPicker } from '@/components/budget/PlaidCategoryPicker'
+import { SPENDING_PLAID_CATEGORIES } from '@/lib/plaidCategories'
 import type { BudgetCategory } from '@/types/budget'
+
+// The only editable field on a category — see BudgetCategoryBase.
+// autoCategorizeBuckets. Local `buckets` state (not RHF) since this is a
+// one-field save-on-click dialog, not a multi-field form.
+function EditCategoryBucketsDialog({ category }: { category: BudgetCategory }) {
+  const [open, setOpen] = useState(false)
+  const [buckets, setBuckets] = useState<string[]>(category.autoCategorizeBuckets ?? [])
+  const setCategoryBuckets = useBudgetStore((state) => state.setCategoryBuckets)
+
+  function handleOpenChange(nextOpen: boolean) {
+    if (nextOpen) setBuckets(category.autoCategorizeBuckets ?? [])
+    setOpen(nextOpen)
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={handleOpenChange}>
+      <DialogTrigger asChild>
+        <Button variant="outline" size="sm">
+          <Pencil className="size-3.5" />
+          Auto-categorize
+        </Button>
+      </DialogTrigger>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>Auto-categorize transactions</DialogTitle>
+          <DialogDescription>
+            Matching bank transactions sort into "{category.name}" automatically. You
+            can always recategorize manually.
+          </DialogDescription>
+        </DialogHeader>
+        <PlaidCategoryPicker
+          groups={SPENDING_PLAID_CATEGORIES}
+          value={buckets}
+          onChange={setBuckets}
+        />
+        <DialogFooter>
+          <Button
+            onClick={() => {
+              setCategoryBuckets(category.id, buckets)
+              setOpen(false)
+            }}
+          >
+            Save
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  )
+}
 
 // Same reasoning as elsewhere in this file's siblings: build the display
 // date from the string's own year/month/day rather than `new Date(dateStr)`
@@ -95,7 +155,7 @@ export function CategoryPurchases({ category, range }: CategoryPurchasesProps) {
                 <Button
                   variant="ghost"
                   size="icon-xs"
-                  onClick={() => removePurchase(purchase.id)}
+                  onClick={() => removePurchase(purchase.id, purchase.date)}
                   aria-label={`Remove ${purchase.description}`}
                 >
                   <Trash2 className="size-3.5" />
@@ -157,7 +217,8 @@ export function CategoryPurchases({ category, range }: CategoryPurchasesProps) {
         </p>
       )}
 
-      <div className="flex justify-end border-t pt-3">
+      <div className="flex justify-end gap-2 border-t pt-3">
+        <EditCategoryBucketsDialog category={category} />
         <AlertDialog>
           <AlertDialogTrigger asChild>
             <Button variant="destructive" size="sm">

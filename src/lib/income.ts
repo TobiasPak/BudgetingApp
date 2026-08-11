@@ -1,10 +1,6 @@
-import { getTotalSpent } from './spending'
 import { annualize, isDateInRange, type DateFilterMode, type DateRange } from './period'
-import { isPlaidTransactionCategorized } from '@/types/plaidTransaction'
 import type { Paycheck } from '@/types/paycheck'
 import type { BudgetCategory } from '@/types/budget'
-import type { Purchase } from '@/types/purchase'
-import type { PlaidTransaction } from '@/types/plaidTransaction'
 import type { IncomeSource } from '@/types/incomeSource'
 
 export function getPaychecksInRange(
@@ -12,56 +8,6 @@ export function getPaychecksInRange(
   range: DateRange
 ): Paycheck[] {
   return paychecks.filter((paycheck) => isDateInRange(paycheck.date, range))
-}
-
-// Total income within the selected range — real money that actually landed
-// in the account, whether or not it's been sorted into an income source
-// yet. Sums every Paycheck (manually entered or created via categorizing a
-// Plaid transaction) plus every synced Plaid transaction that's
-// income-type but not yet categorized — same "count every real
-// transaction regardless of categorization" design as getTotalSpent in
-// src/lib/spending.ts, and the same double-count guard: a categorized
-// transaction already has a corresponding Paycheck counted in the first
-// half. Per-source figures (getSourceIncomeInRange) intentionally stay
-// paycheck-only below, since an uncategorized transaction has no source to
-// attribute it to.
-export function getIncomeInRange(
-  paychecks: Paycheck[],
-  plaidTransactions: PlaidTransaction[],
-  range: DateRange
-): number {
-  const paycheckTotal = getPaychecksInRange(paychecks, range).reduce(
-    (sum, p) => sum + p.amount,
-    0
-  )
-
-  const uncategorizedIncomeTotal = plaidTransactions
-    .filter(
-      (t) =>
-        t.transactionType === 'income' &&
-        !isPlaidTransactionCategorized(t) &&
-        isDateInRange(t.date, range)
-    )
-    .reduce((sum, t) => sum + t.amount, 0)
-
-  return paycheckTotal + uncategorizedIncomeTotal
-}
-
-// Actual cash leftover from the selected range's earnings after spending —
-// distinct from a category's "remaining budget" (budgeted minus spent),
-// which is a different concept scoped to the Budget domain, not income. No
-// annualizing here — both sides are already totals for the same window, so
-// there's nothing to project.
-export function getLeftoverCash(
-  paychecks: Paycheck[],
-  purchases: Purchase[],
-  plaidTransactions: PlaidTransaction[],
-  range: DateRange
-): number {
-  return (
-    getIncomeInRange(paychecks, plaidTransactions, range) -
-    getTotalSpent(purchases, plaidTransactions, range)
-  )
 }
 
 // This source's paychecks within the selected range, most recent first —
@@ -100,24 +46,6 @@ interface MonthlyTargetContext {
   monthlyIncome: number
   averagePaycheckAmount: number
   paychecksPerMonth: number
-}
-
-// The implied MONTHLY income rate for the selected range — what
-// getMonthlyTarget's percentage-of-income categories resolve against
-// regardless of whether the filter is set to a month or a year. Derived by
-// annualizing the range's actual income the same way
-// getAnnualizedIncomeByType does, then dividing back down to a monthly
-// rate: for 'month' mode this round-trips to exactly the range's own
-// income (unchanged prior behavior — (income × 12) ÷ 12 = income); for
-// 'year' mode it's that year's total income ÷ 12 (an average monthly rate).
-export function getMonthlyIncomeEquivalent(
-  paychecks: Paycheck[],
-  plaidTransactions: PlaidTransaction[],
-  mode: DateFilterMode,
-  range: DateRange
-): number {
-  const incomeInRange = getIncomeInRange(paychecks, plaidTransactions, range)
-  return annualize(incomeInRange, mode) / 12
 }
 
 export interface AnnualizedIncomeByType {

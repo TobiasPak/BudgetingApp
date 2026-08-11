@@ -3,13 +3,11 @@ import { BudgetSummary } from '@/components/budget/BudgetSummary'
 import { IncomeOverview } from '@/components/budget/IncomeOverview'
 import { AddBudgetDialog } from '@/components/budget/AddBudgetDialog'
 import { useBudgetStore } from '@/stores/useBudgetStore'
+import { usePeriodSnapshotStore } from '@/stores/usePeriodSnapshotStore'
 import { useDateFilterStore, useDateFilterRange } from '@/stores/useDateFilterStore'
 import { getTargetForMode } from '@/lib/budget'
-import {
-  getAveragePaycheckAmount,
-  getMonthlyIncomeEquivalent,
-  getMonthlyTarget,
-} from '@/lib/income'
+import { getAveragePaycheckAmount, getMonthlyTarget } from '@/lib/income'
+import { annualize } from '@/lib/period'
 
 // Reads mode/range from the shared useDateFilterStore rather than owning
 // its own state — this mounts independently (once as the standalone
@@ -18,13 +16,16 @@ import {
 export function BudgetContent() {
   const categories = useBudgetStore((state) => state.categories)
   const paychecks = useBudgetStore((state) => state.paychecks)
-  const plaidTransactions = useBudgetStore((state) => state.plaidTransactions)
   const paychecksPerMonth = useBudgetStore((state) => state.paychecksPerMonth)
+  const windowIncome = usePeriodSnapshotStore((state) => state.totalIncome)
 
   const mode = useDateFilterStore((state) => state.mode)
   const range = useDateFilterRange()
 
-  const monthlyIncome = getMonthlyIncomeEquivalent(paychecks, plaidTransactions, mode, range)
+  // Same math getMonthlyIncomeEquivalent used to do inline — see the
+  // identical comment in BudgetSummary.tsx for why this now reads off the
+  // period snapshot instead of a fresh live sum.
+  const monthlyIncome = annualize(windowIncome, mode) / 12
   const averagePaycheckAmount = getAveragePaycheckAmount(paychecks)
   const targetContext = { monthlyIncome, averagePaycheckAmount, paychecksPerMonth }
 

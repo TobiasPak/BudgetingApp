@@ -2,15 +2,10 @@ import { useState } from 'react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { cn, formatCurrency } from '@/lib/utils'
 import { useBudgetStore } from '@/stores/useBudgetStore'
+import { usePeriodSnapshotStore } from '@/stores/usePeriodSnapshotStore'
 import { annualize, type DateFilterMode, type DateRange } from '@/lib/period'
 import { getTargetForMode } from '@/lib/budget'
-import {
-  getAveragePaycheckAmount,
-  getIncomeInRange,
-  getMonthlyIncomeEquivalent,
-  getMonthlyTarget,
-} from '@/lib/income'
-import { getTotalSpent } from '@/lib/spending'
+import { getAveragePaycheckAmount, getMonthlyTarget } from '@/lib/income'
 import {
   CategoryBreakdownBar,
   type BudgetMetric,
@@ -36,17 +31,19 @@ export function BudgetSummary({ mode, range }: BudgetSummaryProps) {
   const categories = useBudgetStore((state) => state.categories)
   const paychecks = useBudgetStore((state) => state.paychecks)
   const purchases = useBudgetStore((state) => state.purchases)
-  const plaidTransactions = useBudgetStore((state) => state.plaidTransactions)
   const paychecksPerMonth = useBudgetStore((state) => state.paychecksPerMonth)
+  const windowIncome = usePeriodSnapshotStore((state) => state.totalIncome)
+  const windowSpent = usePeriodSnapshotStore((state) => state.totalSpent)
 
   const [selectedMetric, setSelectedMetric] = useState<BudgetMetric>('income')
 
-  const monthlyIncomeEquivalent = getMonthlyIncomeEquivalent(
-    paychecks,
-    plaidTransactions,
-    mode,
-    range
-  )
+  // "Total Budgeted" always resolves against TODAY's live category
+  // definitions (categories aren't versioned historically) — but a
+  // percentage-of-income category's dollar target still needs to scale with
+  // whatever period is being viewed, so the monthly-income input comes from
+  // this period's own real totalIncome (the snapshot) rather than a fresh
+  // live sum — same math getMonthlyIncomeEquivalent used to do inline.
+  const monthlyIncomeEquivalent = annualize(windowIncome, mode) / 12
   const averagePaycheckAmount = getAveragePaycheckAmount(paychecks)
   const targetContext = {
     monthlyIncome: monthlyIncomeEquivalent,
@@ -60,12 +57,10 @@ export function BudgetSummary({ mode, range }: BudgetSummaryProps) {
   // (unchanged behavior from before this filter had a year mode at all), or
   // a monthly average while viewing a whole year — avoids a 3rd card that
   // would otherwise just repeat the 2nd card's number when mode is 'year'.
-  const windowIncome = getIncomeInRange(paychecks, plaidTransactions, range)
   const windowBudgeted = categories.reduce(
     (sum, c) => sum + getTargetForMode(getMonthlyTarget(c, targetContext), mode),
     0
   )
-  const windowSpent = getTotalSpent(purchases, plaidTransactions, range)
 
   const annualBudgeted = annualize(windowBudgeted, mode)
   const annualSpent = annualize(windowSpent, mode)

@@ -12,6 +12,7 @@ import { toast } from 'sonner'
 import { getFirebaseAuth } from '@/lib/firebase'
 import { ensureUserDoc } from '@/lib/firestore/users'
 import { useBudgetStore } from '@/stores/useBudgetStore'
+import { usePeriodSnapshotStore } from '@/stores/usePeriodSnapshotStore'
 import { syncTransactions, syncBalance } from '@/lib/plaidServer'
 
 interface AuthState {
@@ -124,8 +125,10 @@ onAuthStateChanged(getFirebaseAuth(), (user) => {
   if (user) {
     void ensureUserDoc(user.uid)
     useBudgetStore.getState().startSync(user.uid)
+    usePeriodSnapshotStore.getState().start(user.uid)
     syncPlaidDataOnceReady(user.uid)
   } else {
     useBudgetStore.getState().stopSync()
+    usePeriodSnapshotStore.getState().stop()
   }
 })

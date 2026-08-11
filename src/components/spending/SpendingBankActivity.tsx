@@ -1,3 +1,4 @@
+import { useEffect, useState } from 'react'
 import {
   Select,
   SelectContent,
@@ -9,6 +10,8 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { cn, formatCurrency } from '@/lib/utils'
 import { isDateInRange, type DateRange } from '@/lib/period'
 import { useBudgetStore } from '@/stores/useBudgetStore'
+import { TransactionFilterBar } from '@/components/plaid/TransactionFilterBar'
+import { applyTransactionFilters, createEmptyFilters } from '@/lib/plaidTransactionFilters'
 import type { BudgetCategory } from '@/types/budget'
 
 // Same reasoning as elsewhere in this app: build the display date from the
@@ -41,13 +44,25 @@ export function SpendingBankActivity({ categories, range }: SpendingBankActivity
     (state) => state.categorizeTransactionAsSpending
   )
 
-  const transactions = plaidTransactions
+  const [filters, setFilters] = useState(() => createEmptyFilters(range))
+
+  // Mirrors CategoryPurchases's established "re-default on range change"
+  // pattern — a stale sub-range/pill selection from a previous month/year
+  // wouldn't make sense (and its date bounds would be out of range) once
+  // the shared date filter moves.
+  useEffect(() => {
+    setFilters(createEmptyFilters(range))
+  }, [range])
+
+  const candidateTransactions = plaidTransactions
     .filter((t) => t.transactionType === 'spending' && isDateInRange(t.date, range))
     .sort((a, b) => (a.date < b.date ? 1 : -1))
 
+  const transactions = applyTransactionFilters(candidateTransactions, filters)
+
   const categoryNameById = new Map(categories.map((c) => [c.id, c.name]))
 
-  if (transactions.length === 0) return null
+  if (candidateTransactions.length === 0) return null
 
   return (
     <Card>
@@ -57,6 +72,17 @@ export function SpendingBankActivity({ categories, range }: SpendingBankActivity
         </CardTitle>
       </CardHeader>
       <CardContent className="divide-y">
+        <TransactionFilterBar
+          transactions={candidateTransactions}
+          range={range}
+          filters={filters}
+          onFiltersChange={setFilters}
+        />
+        {transactions.length === 0 && (
+          <p className="py-4 text-center text-sm text-muted-foreground">
+            No transactions match these filters.
+          </p>
+        )}
         {transactions.map((transaction) => (
           <div
             key={transaction.id}
@@ -85,7 +111,8 @@ export function SpendingBankActivity({ categories, range }: SpendingBankActivity
                 {transaction.authorizedDate &&
                   transaction.authorizedDate !== transaction.date &&
                   ` (authorized ${formatTransactionDate(transaction.authorizedDate)})`}{' '}
-                · {transaction.plaidCategory}
+                · {transaction.plaidCategoryPrimary ? `${transaction.plaidCategoryPrimary} · ` : ''}
+                {transaction.plaidCategory}
               </p>
               <p className="truncate text-xs text-muted-foreground">
                 {transaction.accountName}

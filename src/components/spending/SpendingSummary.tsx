@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { cn, formatCurrency } from '@/lib/utils'
 import { useBudgetStore } from '@/stores/useBudgetStore'
-import { getTotalSpent } from '@/lib/spending'
+import { usePeriodSnapshotStore } from '@/stores/usePeriodSnapshotStore'
 import { annualize, type DateFilterMode, type DateRange } from '@/lib/period'
 import {
   SpendingPieChart,
@@ -27,11 +27,10 @@ function selectableCardClass(isSelected: boolean): string {
 export function SpendingSummary({ mode, range }: SpendingSummaryProps) {
   const categories = useBudgetStore((state) => state.categories)
   const purchases = useBudgetStore((state) => state.purchases)
-  const plaidTransactions = useBudgetStore((state) => state.plaidTransactions)
+  const windowSpent = usePeriodSnapshotStore((state) => state.totalSpent)
 
   const [selectedMetric, setSelectedMetric] = useState<SpendingMetric>('window')
 
-  const windowSpent = getTotalSpent(purchases, plaidTransactions, range)
   // Complementary granularity, same pattern as BudgetSummary/IncomeSummary:
   // an annual projection while viewing a month, a monthly average while
   // viewing a whole year.

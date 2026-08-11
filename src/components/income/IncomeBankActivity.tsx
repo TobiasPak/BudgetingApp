@@ -1,3 +1,4 @@
+import { useEffect, useState } from 'react'
 import {
   Select,
   SelectContent,
@@ -9,6 +10,8 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { cn, formatCurrency } from '@/lib/utils'
 import { isDateInRange, type DateRange } from '@/lib/period'
 import { useBudgetStore } from '@/stores/useBudgetStore'
+import { TransactionFilterBar } from '@/components/plaid/TransactionFilterBar'
+import { applyTransactionFilters, createEmptyFilters } from '@/lib/plaidTransactionFilters'
 import type { IncomeSource } from '@/types/incomeSource'
 
 // Same reasoning as elsewhere in this app: build the display date from the
@@ -40,13 +43,24 @@ export function IncomeBankActivity({ incomeSources, range }: IncomeBankActivityP
     (state) => state.categorizeTransactionAsIncome
   )
 
-  const transactions = plaidTransactions
+  const [filters, setFilters] = useState(() => createEmptyFilters(range))
+
+  // Mirrors CategoryPurchases's established "re-default on range change"
+  // pattern — see SpendingBankActivity's identical effect for the full
+  // reasoning.
+  useEffect(() => {
+    setFilters(createEmptyFilters(range))
+  }, [range])
+
+  const candidateTransactions = plaidTransactions
     .filter((t) => t.transactionType === 'income' && isDateInRange(t.date, range))
     .sort((a, b) => (a.date < b.date ? 1 : -1))
 
+  const transactions = applyTransactionFilters(candidateTransactions, filters)
+
   const sourceNameById = new Map(incomeSources.map((s) => [s.id, s.name]))
 
-  if (transactions.length === 0) return null
+  if (candidateTransactions.length === 0) return null
 
   return (
     <Card>
@@ -56,6 +70,17 @@ export function IncomeBankActivity({ incomeSources, range }: IncomeBankActivityP
         </CardTitle>
       </CardHeader>
       <CardContent className="divide-y">
+        <TransactionFilterBar
+          transactions={candidateTransactions}
+          range={range}
+          filters={filters}
+          onFiltersChange={setFilters}
+        />
+        {transactions.length === 0 && (
+          <p className="py-4 text-center text-sm text-muted-foreground">
+            No transactions match these filters.
+          </p>
+        )}
         {transactions.map((transaction) => (
           <div
             key={transaction.id}
@@ -84,7 +109,8 @@ export function IncomeBankActivity({ incomeSources, range }: IncomeBankActivityP
                 {transaction.authorizedDate &&
                   transaction.authorizedDate !== transaction.date &&
                   ` (authorized ${formatTransactionDate(transaction.authorizedDate)})`}{' '}
-                · {transaction.plaidCategory}
+                · {transaction.plaidCategoryPrimary ? `${transaction.plaidCategoryPrimary} · ` : ''}
+                {transaction.plaidCategory}
               </p>
               <p className="truncate text-xs text-muted-foreground">
                 {transaction.accountName}

@@ -59,7 +59,7 @@ Implemented:
 - Routing: `/` (dashboard home), `/budget` (Budget envelopes + income), `/spending` (Spending screen), `/income` (Income screen), `/tax` (Tax estimate), `/about` (placeholder)
 - Tailwind v4 + shadcn/ui wired up (`components.json`, `src/lib/utils.ts`,
   components: `button`, `card`, `progress`, `dialog`, `input`, `label`,
-  `select`, `popover`, `tabs`, `sonner`, `alert-dialog`)
+  `select`, `popover`, `tabs`, `sonner`, `alert-dialog`, `checkbox`)
 - Semantic color tokens `--success`/`--info`/`--warning` added to
   `src/index.css` (light + dark values) alongside the pre-existing
   `--destructive`, since the installed shadcn Nova theme's `--chart-1..5`
@@ -720,6 +720,42 @@ Implemented:
     (explicitly deferred — `sync_transactions` only handles
     `transactions` today), and a resolved policy for refund-like
     transactions (see the categorization-check bullet above).
+- **Headline totals (Monthly/Yearly Spent, Earned this month, Projected
+  this year, the 3 budget percentage cards, bank balance) are now
+  server-computed and persisted, not derived live on every render.**
+  Every write that could affect a period (manual purchase/paycheck
+  add/delete, categorizing a Plaid transaction, cascading category/source
+  delete, a Plaid sync) triggers a full requery-and-overwrite of that
+  period's `users/{uid}/monthlySnapshots/{YYYY-MM}` and
+  `yearlySnapshots/{YYYY}` docs (`totalSpent`, `totalIncome`, optional
+  `bankBalance`/`bankBalanceAsOf`) — see
+  `src/lib/firestore/recomputeSnapshot.ts` (client writes) and
+  `plaid-server/src/lib/recomputeSnapshot.ts` (Plaid-driven writes, same
+  logic, separate runtime). No Cloud Functions/Blaze involved — deliberately
+  wired into the existing write paths instead (see the 2026-08-06 Session
+  Log entry for why). The frontend reads via a single re-targeting
+  `usePeriodSnapshotStore` listener (`src/stores/`) that follows whichever
+  period the shared date filter points to. `IncomeOverview.tsx`'s bank
+  balance is never an editable input in any state — "Connect a bank to see
+  your balance" when unlinked, the live root-doc value for the current
+  period once linked, that period's frozen snapshot (or "Not available")
+  for a past period, since Plaid has no "balance as of a past date" API.
+  Per-category/per-source breakdowns (`getCategorySpent`,
+  `getSourceIncomeInRange`) are unaffected — still live-derived from raw
+  `purchases`/`paychecks`, deliberately out of scope for this change.
+- **Auto-categorization**: creating a budget category or income source can
+  map it to one or more Plaid `personal_finance_category` buckets
+  (`autoCategorizeBuckets: string[]` — primary and/or detailed, editable
+  after creation via a small dedicated dialog, the only editable field on
+  either entity). Every synced Plaid transaction that matches — new
+  (`plaid-server`'s sync routes) or already sitting uncategorized
+  (`runAutoCategorizeBackfill`, swept whenever a mapping is created or
+  edited) — is turned into a real Purchase/Paycheck automatically, exactly
+  like the pre-existing manual "Categorize…" control, never locked
+  (freely re-categorizable/deletable after). See
+  `src/lib/plaidCategoryMatch.ts`/`src/lib/plaidCategories.ts` and the
+  2026-08-06 "Auto-categorization" Session Log entry for the full design
+  (most-specific-bucket-wins resolution, the picker UI).
 
 Not yet implemented: a running tax-reserve balance, itemized deductions/
 credits, filing statuses other than single, a real AI categorization
@@ -801,6 +837,13 @@ src/
                     # feature-specific so it lives in components/spending/ instead,
                     # same reasoning as CategoryBreakdownBar living in
                     # components/budget/)
+    plaid/         # Genuinely shared, Plaid-transaction-shaped UI — not owned by
+                    # any one feature the way PlaidCategoryPicker (category-mapping
+                    # UI) is anchored to components/budget/. TransactionFilterBar —
+                    # search box + multi-select type/account pills + a date
+                    # sub-range, used by both SpendingBankActivity and
+                    # IncomeBankActivity above their transaction lists (see
+                    # src/lib/plaidTransactionFilters.ts for the filter logic)
   pages/           # route-level components — each is now a thin wrapper (heading
                     # + "Back to dashboard" button) around its feature's *Content
                     # component (HomePage = dashboard, BudgetPage, SpendingPage,
@@ -825,7 +868,13 @@ src/
                     # pure in-memory UI state, deliberately NOT Firestore-synced
                     # and NOT folded into useBudgetStore; also exports
                     # useDateFilterRange(), a memoized {start, end} selector safe
-                    # to use in effect/memo dependency arrays)
+                    # to use in effect/memo dependency arrays;
+                    # usePeriodSnapshotStore.ts — one re-targeting onSnapshot
+                    # listener that follows the shared date filter, exposing
+                    # totalSpent/totalIncome/bankBalance/bankBalanceAsOf read
+                    # from users/{uid}/monthlySnapshots|yearlySnapshots — the
+                    # source every headline total reads from now, see
+                    # src/lib/firestore/recomputeSnapshot.ts)
   lib/
     firebase.ts    # Firebase SDK init: `app`, `db` eager; `getFirebaseAuth()` lazy
                     # (getAuth() throws eagerly on missing/invalid API key, unlike
@@ -883,7 +932,23 @@ src/
                     # sync" seed ever called — was removed as dead code once
                     # that feature was deleted; real synced transactions are
                     # written server-side by plaid-server instead, via the
-                    # Admin SDK, not through this file at all.)
+                    # Admin SDK, not through this file at all.) Every
+                    # write above that can affect a period's totals now
+                    # also calls recomputeSnapshot.ts afterward — see that
+                    # file and the 2026-08-06 Session Log entry.
+      recomputeSnapshot.ts # recomputeSnapshot(uid, dateStr) — full
+                    # requery-and-overwrite (not an incremental counter) of
+                    # the month+year period dateStr falls into: sums
+                    # purchases/paychecks/uncategorized plaidTransactions in
+                    # that range via real Firestore queries, writes
+                    # totalSpent/totalIncome to monthlySnapshots/
+                    # yearlySnapshots. recomputeSnapshotsForDates(uid, dates)
+                    # dedupes by month for writes spanning many periods
+                    # (cascading category/source delete). Client SDK version
+                    # here; plaid-server/src/lib/recomputeSnapshot.ts is the
+                    # Admin SDK copy used by the sync routes — separate
+                    # runtimes, same duplication precedent as this app's
+                    # Firestore doc types
       users.ts      # ensureUserDoc(uid) — idempotent setDoc(...,{merge:true}),
                     # called on every sign-in so it never clobbers existing
                     # bankBalance/paychecksPerMonth
@@ -914,47 +979,31 @@ src/
                     # monthly-rate target to the shared filter's mode (exact for
                     # 'month', ×12 for 'year')
     income.ts      # derived income helpers (getPaychecksInRange — real Paycheck
-                    # docs only, unchanged, still what src/lib/tax/ and
-                    # per-source figures go through; getIncomeInRange — total
-                    # income for the range including every real transaction
-                    # regardless of categorization: every Paycheck plus every
-                    # synced Plaid transaction that's income-type but not yet
-                    # categorized (isPlaidTransactionCategorized false),
-                    # guarded against double-counting since a categorized
-                    # transaction already has a corresponding Paycheck;
-                    # getMonthlyIncomeEquivalent — the implied MONTHLY rate for
-                    # whatever the filter is set to (now also plaidTransactions-
-                    # aware via getIncomeInRange), what getMonthlyTarget's
-                    # percentage-of-income categories resolve against regardless
-                    # of mode; getAveragePaycheckAmount, getMonthlyTarget —
-                    # resolves a BudgetCategory's dollar target from income
-                    # context; getSourcePaychecks/getSourceIncomeInRange — a
+                    # docs only, still what src/lib/tax/ and per-source figures
+                    # go through; getSourcePaychecks/getSourceIncomeInRange — a
                     # single IncomeSource's paychecks/total for the selected
                     # range, deliberately still paycheck-only since an
                     # uncategorized transaction has no source to attribute it
-                    # to; getLeftoverCash — range income minus getTotalSpent,
-                    # the dashboard's "money left over" figure, deliberately named
-                    # and kept distinct from the unrelated "remaining budget"
-                    # (budgeted-minus-spent) concept used on the Budget tab;
+                    # to; getAveragePaycheckAmount, getMonthlyTarget — resolves
+                    # a BudgetCategory's dollar target from income context;
                     # getAnnualizedIncomeByType — the selected range's income
                     # annualized via `annualize` and split by each source's
                     # incomeType into {w2, selfEmployed}, the one integration
                     # point src/lib/tax/ uses — deliberately built on
-                    # getPaychecksInRange, not getIncomeInRange, so an
-                    # uncategorized transaction with no known incomeType is
-                    # never silently guessed into a tax bucket)
+                    # getPaychecksInRange so an uncategorized transaction with
+                    # no known incomeType is never silently guessed into a tax
+                    # bucket. getIncomeInRange/getTotalSpent/getLeftoverCash/
+                    # getMonthlyIncomeEquivalent (and the sibling spending.ts
+                    # file, which held only getTotalSpent) were deleted
+                    # outright once every screen moved to reading
+                    # usePeriodSnapshotStore instead — see the 2026-08-06
+                    # Session Log entry)
     purchases.ts   # derived spending helpers (getCategoryPurchases, getCategorySpent) —
                     # a category's spend is summed from Purchase records filtered to
                     # the shared date filter's selected range, never stored directly;
                     # deliberately still purchase-only (mirrors getSourceIncomeInRange's
                     # reasoning) since a category-level figure has nothing to attribute
                     # an uncategorized transaction to
-    spending.ts    # getTotalSpent — total spend for the range including every real
-                    # transaction regardless of categorization: every Purchase (summed
-                    # directly, not per-category — a Purchase always carries a valid
-                    # categoryId so the two are equivalent) plus every synced Plaid
-                    # transaction that's spending-type but not yet categorized, with
-                    # the same double-count guard getIncomeInRange uses
     period.ts      # DateRange ({start, end}), DateFilterMode ('month' | 'year'),
                     # isDateInRange, monthBounds/yearBounds — the shared date
                     # filter's core date math. annualize(amountInRange, mode) —
@@ -1069,6 +1118,10 @@ plaid-server/       # Standalone Express + TypeScript backend for real Plaid
                     # map. Shared by exchangeToken.ts (at link time) and
                     # syncTransactions.ts (self-healing backfill), so the
                     # two never duplicate this logic
+  src/lib/recomputeSnapshot.ts # Admin SDK copy of src/lib/firestore/
+                    # recomputeSnapshot.ts's logic (see that file) — called
+                    # by syncTransactions.ts/syncBalance.ts below whenever a
+                    # Plaid-driven write could affect a period's totals
   src/routes/syncTransactions.ts # POST /api/sync_transactions — cursor-based
                     # pull sync (transactionsSync), writes into the same
                     # users/{uid}/plaidTransactions shape the frontend uses.
@@ -1099,13 +1152,24 @@ plaid-server/       # Standalone Express + TypeScript backend for real Plaid
                     # transaction docs unconditionally — safe even if
                     # already categorized, since categorizing creates an
                     # independent Purchase/Paycheck that doesn't reference
-                    # back to the source PlaidTransaction
+                    # back to the source PlaidTransaction. Collects every
+                    # distinct date touched by added/modified/removed
+                    # transactions across the whole sync and calls
+                    # recomputeSnapshotsForDates once at the end (removed
+                    # transactions only carry transaction_id, so their date
+                    # is read from the doc before it's deleted)
   src/routes/syncBalance.ts # POST /api/sync_balance — calls Plaid's
                     # accountsBalanceGet (real-time, not the cached
                     # accountsGet) per linked item, sums `available` (falls
                     # back to `current`) across depository-type accounts
-                    # only, writes the total to users/{uid}.bankBalance —
-                    # the same field the frontend's old manual entry used
+                    # only, writes the total to users/{uid}.bankBalance (the
+                    # fast "right now" value) AND stamps the same total +
+                    # a bankBalanceAsOf timestamp onto whichever month/year
+                    # is currently open by the server's own clock, via
+                    # recomputeSnapshot.ts's monthlySnapshots/
+                    # yearlySnapshots docs — the only way past-period
+                    # balance can exist at all, since Plaid has no
+                    # "balance as of a past date" API
   src/types.ts       # Local copy of FirestorePlaidTransactionDoc (kept in
                     # sync by hand with src/lib/firestore/types.ts, same
                     # reasoning functions/ already keeps its own copies, now
@@ -3292,3 +3356,658 @@ unique findings, not the standard checklist.
   plaid-server and the emulator process) once verification finished,
   confirmed via `netstat` that every relevant port (5173/8090/9099/8080)
   was free again before ending the turn.
+
+### 2026-08-06 — Symmetric primary/detailed Plaid category fallback + display both
+- Follow-up from the previous session's Plaid Link + transaction-
+  enrichment work merged to `main`. User asked whether Plaid's
+  `personal_finance_category` "sub-bucket" (detailed) values were being
+  saved at all — confirmed yes (`plaidCategory`, despite the name, has
+  always held the *detailed* value; `plaidCategoryPrimary` holds the
+  coarse *primary* bucket — a naming choice that reads backwards from
+  what it stores, which was the actual source of the question). Then
+  asked for both primary and sub-bucket to always be stored together,
+  "not only one or the other."
+- That surfaced a real, if narrow, asymmetry in `buildTransactionDoc`
+  (`plaid-server/src/routes/syncTransactions.ts`): `plaidCategory`
+  already had a legacy fallback (Plaid's deprecated `category` array,
+  joined) for transactions where Plaid doesn't return the modern
+  `personal_finance_category` object, but `plaidCategoryPrimary` had no
+  equivalent fallback — it would simply be omitted in that case, leaving
+  only one of the two fields populated. Fixed by deriving both from a
+  shared `detailedCategory`/`primaryCategory` pair, with
+  `primaryCategory` falling back to `category?.[0]` (the legacy
+  taxonomy's own coarse-bucket-equivalent, the same role `category`'s
+  full joined path already played for `plaidCategory`'s existing
+  fallback). In the common case (Plaid returns its modern taxonomy —
+  confirmed 48/48 real synced transactions earlier this session) this is
+  a no-op; it only changes behavior for the legacy-taxonomy edge case.
+- **Verified the logic with a throwaway script** (`plaid-server/
+  verify-category-logic.mjs`, deleted after use, matching this project's
+  established convention) against 3 synthetic cases — modern category
+  present, legacy-only present, neither present — since Plaid's real
+  sandbox (Tartan Bank) always returns the modern taxonomy and never
+  exercises the legacy-only path live. All 3 passed.
+- Added display for `plaidCategoryPrimary` — previously stored but never
+  rendered anywhere — to both `SpendingBankActivity.tsx`/
+  `IncomeBankActivity.tsx`'s row metadata line, alongside the existing
+  `plaidCategory` (detailed) display: `· {primary} · {detailed}` when a
+  primary exists, falling back to just `· {detailed}` (no stray
+  separator) for older transactions or the "nothing at all" case.
+  Raw taxonomy strings shown as-is, matching how `plaidCategory` was
+  already displayed unhumanized.
+- **Verified the display live via direct Firestore seeding**, not a real
+  Plaid Link flow — Plaid Link's hosted iframe wasn't responding
+  reliably to clicks in the browser-preview tooling this pass (a known,
+  previously-documented intermittent issue, not an app bug); seeded two
+  synthetic `plaidTransactions` docs directly into the emulator (one
+  modern with both fields, one legacy-shaped with only `plaidCategory`)
+  via a throwaway script (`plaid-server/verify-category-display.mjs`,
+  deleted after use) and confirmed both rendered exactly as designed:
+  "Aug 5 · TRAVEL · TRAVEL_FLIGHTS" for the modern case, "Aug 4 ·
+  Uncategorized" (no stray "· ") for the fallback case.
+- Also researched and gave the user Plaid's complete
+  `personal_finance_category` taxonomy (18 primary buckets, ~104
+  detailed sub-buckets, fetched from Plaid's own published CSV) while
+  scoping this work — surfaced that the v2 taxonomy (default for
+  accounts enabled since Dec 2025) adds `LOAN_DISBURSEMENTS` and a plain
+  `OTHER` primary bucket beyond the 16 this app's comments previously
+  assumed. Flagged, not yet acted on: under the currently-planned (but
+  deferred) income-vs-spending refund fix, a `LOAN_DISBURSEMENTS_*`
+  transaction would incorrectly fall into "spending" the same way the
+  original refund bug did, since it's neither `INCOME` nor `TRANSFER_IN`
+  — worth folding in when that fix is actually built.
+- User explicitly deferred the income-vs-spending refund classification
+  fix (the "United Airlines refund miscategorized as income" edge case
+  flagged in the previous session) to a later pass — this session's work
+  was scoped to category storage/display only, no changes to
+  `deriveTransactionType` or the spending/income split.
+- `tsc -b`/`tsc --noEmit`/`lint` all clean throughout. Not yet committed —
+  per this file's standing convention, committing is a separate,
+  explicit step.
+
+### 2026-08-06 — Server-computed, persisted period snapshots (spend/income/balance)
+- User asked to change how every headline figure (Monthly/Yearly Spent,
+  Earned this month, Projected this year, the 3 budget percentage cards,
+  bank balance) is calculated: they should update in real time per Plaid
+  sync via Firebase triggers, and be saved to Firestore so a past
+  month/year can be looked up directly instead of always re-derived from
+  raw records. Also: bank balance should never be a fillable input — always
+  a real Plaid number.
+- **Went through Plan Mode given the size and a real infrastructure
+  question buried in "use Firebase triggers."** Confirmed via
+  `AskUserQuestion` before writing code: (1) Firestore-triggered Cloud
+  Functions require upgrading off the free Spark plan to Blaze — a hard
+  requirement for deploying *any* Cloud Function, not just one making
+  outbound calls (the same reason `plaid-server` was built standalone
+  instead of as a Cloud Function last session, and why the existing
+  `categorizeTransaction` stub in `functions/` has never been deployed).
+  User chose to skip Cloud Functions/Blaze entirely and have the recompute
+  happen directly from the **existing write paths** that already touch
+  these collections (`plaid-server`'s sync routes, and the frontend's
+  `src/lib/firestore/writes.ts`) — also strictly faster than a real trigger
+  would be, since it adds no extra network hop on top of what's already
+  instant today via Firestore listeners. (2) Historical balance: Plaid has
+  no "balance as of a past date" API, so the user chose to actively
+  snapshot the real balance on every sync going forward rather than
+  fabricate a backfill for periods before this shipped. (3) "Total
+  Budgeted" stays exactly as it works today — always resolved from the
+  user's *current* live category definitions, since categories aren't
+  versioned historically and the user confirmed that's fine.
+- **New data model**: `users/{uid}/monthlySnapshots/{YYYY-MM}` and
+  `users/{uid}/yearlySnapshots/{YYYY}`, each holding `totalSpent`,
+  `totalIncome`, optional `bankBalance`/`bankBalanceAsOf`, and `updatedAt`.
+  `PeriodSnapshotDoc` added to both `src/lib/firestore/types.ts` and
+  `plaid-server/src/types.ts` (duplicated across the two runtimes, same
+  precedent as `FirestorePlaidTransactionDoc`). No stored "Total Budgeted"
+  or percentage fields — those stay cheap client-side derivations from the
+  two raw totals plus live `categories`.
+- **Recompute strategy: full requery-and-overwrite, not an incremental
+  counter** — the single biggest design call this session. On every write
+  that could affect a period, `recomputeSnapshot(uid, dateStr)` re-queries
+  that period's purchases + paychecks + uncategorized plaidTransactions
+  (same filter logic `getTotalSpent`/`getIncomeInRange` used to do
+  client-side, just as real Firestore range queries scoped to one period
+  instead of filtering the whole in-memory history) and overwrites both
+  the month and year snapshot from scratch. Chosen over incremental
+  `increment()` deltas because it matches this codebase's own established
+  "derived, not stored-and-drifting" philosophy (documented earlier in
+  this file for `monthlySpent`/`periodStart`), is self-healing under
+  races (two concurrent writes to the same period both leave a fully
+  correct total, never a partial delta), and needs zero special-casing
+  for categorization transitions, `modified` Plaid transactions, or
+  cascading deletes — confirmed live that categorizing a transaction
+  nets to the same total automatically via a plain requery. Implemented
+  as two parallel copies (`src/lib/firestore/recomputeSnapshot.ts` client
+  SDK, `plaid-server/src/lib/recomputeSnapshot.ts` Admin SDK) — separate
+  runtimes, same duplication precedent as the type files. Both also
+  export `recomputeSnapshotsForDates` (deduped by month) for writes that
+  can span many periods at once (cascading category/source delete, a
+  multi-page Plaid sync).
+- **Wired into every relevant write path**: `writePurchase`/`writePaycheck`
+  (the record's own date), `deletePurchase`/`deletePaycheck` (signature
+  changed to take the record's `date`, not just `id` — threaded through
+  `useBudgetStore.removePurchase`/`removePaycheck` and their two call
+  sites in `CategoryPurchases.tsx`/`IncomeSourcePaychecks.tsx`/
+  `IncomeOverview.tsx`), `categorizePlaidTransactionAsSpending`/`AsIncome`,
+  and `deleteCategory`/`deleteIncomeSource` (collects every distinct date
+  from the cascading batch *before* committing, since the delete can span
+  many months at once). `plaid-server/src/routes/syncTransactions.ts`
+  collects every distinct date across a sync's `added`/`modified`/
+  `removed` transactions (reading each `removed` doc's `date` before
+  deleting it, since Plaid's removed-transaction payload only carries
+  `transaction_id`) and recomputes once at the end.
+  `plaid-server/src/routes/syncBalance.ts` additionally stamps the real
+  balance + a `bankBalanceAsOf` timestamp onto whichever month/year is
+  currently open by the server's own clock (not whatever period the user
+  happens to be browsing), alongside the existing `users/{uid}.bankBalance`
+  write (kept as-is — still the fastest "right now" value, no snapshot
+  round-trip needed for the live period).
+- **New `usePeriodSnapshotStore`** (`src/stores/`) — one active
+  `onSnapshot` listener at a time, re-targeted at whichever period the
+  shared `useDateFilterStore` currently points to (subscribes to that
+  store to know when to re-attach), mirroring `useBudgetStore`'s
+  one-writer pattern rather than giving every consuming component its own
+  redundant listener on the same doc. Wired into `useAuthStore.ts`'s
+  existing module-level `onAuthStateChanged` alongside
+  `useBudgetStore.startSync`/`stopSync`. `MoneySummaryRow`,
+  `BudgetSummary`, `SpendingSummary`, `IncomeSummary`, `BudgetContent`,
+  `IncomeContent` all now read `totalSpent`/`totalIncome` from this store
+  instead of calling `getTotalSpent`/`getIncomeInRange`/
+  `getMonthlyIncomeEquivalent` live — a percentage-of-income budget
+  target's `monthlyIncome` input now comes from `annualize(snapshot.
+  totalIncome, mode) / 12` instead of a fresh live sum, same math, just
+  fed from the snapshot.
+- **`IncomeOverview.tsx`'s bank balance field is no longer ever an
+  editable input, in any state** — per the explicit "should not be a
+  fillable input field" ask, superseding last session's design (unlinked
+  = editable, linked = read-only). Now: unlinked shows "Connect a bank to
+  see your balance"; linked + viewing the current period shows the live
+  root-doc `bankBalance` (unchanged, freshest possible); linked + viewing
+  a past period shows that period's snapshot `bankBalance` with an "as of
+  <date>" label, or "Not available" if no sync ever landed during that
+  period. `setBankBalance` (store action) and its `writeUserFields`
+  caller are now genuinely dead — removed, matching this file's
+  established precedent of deleting fully-superseded code outright.
+- **`getTotalSpent`/`getIncomeInRange`/`getLeftoverCash`/
+  `getMonthlyIncomeEquivalent` deleted outright** once every call site was
+  migrated to the snapshot store — confirmed via `grep` that nothing else
+  referenced them. `src/lib/spending.ts` (which held only `getTotalSpent`)
+  is now gone entirely; `src/lib/income.ts` lost the same four exports
+  plus their now-unused `Purchase`/`PlaidTransaction`/
+  `isPlaidTransactionCategorized` imports. `getPaychecksInRange`,
+  `getSourcePaychecks`/`getSourceIncomeInRange`, `getAveragePaycheckAmount`,
+  `getAnnualizedIncomeByType`, and `getMonthlyTarget` are unchanged and
+  still live-derived — per-category/per-source breakdowns and the tax
+  module were explicitly out of scope for this change (see below).
+- **Explicitly out of scope, left untouched on purpose**: `getCategorySpent`/
+  `getSourceIncomeInRange` (per-category/per-source breakdowns) stay
+  live-derived from raw `purchases`/`paychecks` only — the user's list of
+  fields to convert was the aggregate totals, and per-category/source is a
+  much higher-cardinality dimension (many categories × many periods) that
+  would multiply the snapshot-doc count; these can already under-count vs.
+  the new aggregate total when there's uncategorized Plaid data, which is
+  pre-existing, accepted, documented behavior, unchanged by this session.
+- Added `monthlySnapshots`/`yearlySnapshots` rules to `firestore.rules` —
+  client can read (drives the historical-lookup UI) and create/update
+  (manual purchase/paycheck writes recompute client-side, not via a Cloud
+  Function), type-checked, `updatedAt` must equal `request.time`. No
+  delete rule — a snapshot is never removed, only recomputed.
+- **Verified end-to-end against the real write paths, not by seeding
+  data directly** (the whole point was proving the write-triggers-recompute
+  wiring actually fires): hit a real port conflict getting the local stack
+  up — the Browser preview tool injects a `PORT` env var matching its
+  assigned port when launching a dev-server config, which is fine for a
+  single-process server but leaks into *every* child of `npm run dev:all`
+  (a `concurrently` wrapper around 3 processes) — `plaid-server`'s own
+  `env.ts` reads `process.env.PORT` directly, so it silently bound to
+  5173 instead of its real `8090` instead of erroring, while Vite
+  auto-detected the collision and moved itself to 5174. Worked around by
+  not using the preview tool for `dev:all` at all: started the Firebase
+  emulators and `plaid-server` directly via background `Bash` (immune to
+  the tool's port injection), then used the preview tool only for the
+  plain single-process `clearbooks-dev` frontend config. Removed the
+  `clearbooks-dev-all` entry this added to `.claude/launch.json` once
+  confirmed broken, rather than leaving a non-working config behind.
+  Signed up a fresh test account, added a real `$500` Groceries category,
+  and — via the actual "Add" form submit (not a direct Firestore write) —
+  added a `$42.50` purchase: confirmed `monthlySnapshots/2026-08` and
+  `yearlySnapshots/2026` both wrote `totalSpent: 42.50` within the same
+  request, and every on-screen figure (Spent this month, Left over, all
+  3 budget percentage cards, the category breakdown) updated live with no
+  reload. Removed the purchase and confirmed both snapshots reverted to
+  `0`. Added a second purchase in July and a second category-scoped
+  purchase in August, then deleted the category itself: confirmed the
+  cascading delete correctly recomputed *both* months' snapshots (not just
+  one) plus the year snapshot, exercising `recomputeSnapshotsForDates`'s
+  multi-period path specifically. Verification carried out via a
+  throwaway Admin SDK script (`plaid-server/check-snapshots.mjs`, deleted
+  after use, matching this file's established convention) reading
+  straight from the Firestore emulator rather than trusting the UI alone.
+  `plaid-server`'s own sync-route changes (`syncTransactions.ts`'s
+  distinct-dates collection, `syncBalance.ts`'s period stamping) were
+  verified via `tsc`/code review only, not a live Plaid Link flow — Plaid
+  Link's hosted iframe is a previously-documented, intermittent
+  no-click-response issue in this browser tooling, not exercised this
+  pass. `tsc -b`/`tsc --noEmit`/`lint` clean throughout. Stopped every
+  process started for verification (frontend, plaid-server, emulators)
+  and confirmed via `netstat` that ports 5173/8080/8090/9099 were free
+  before ending the session. Not yet committed.
+
+### 2026-08-06 — Auto-categorization of Plaid transactions/income via bucket mapping
+- User asked for real auto-categorization: when creating a budget category
+  or income source, optionally map it to Plaid's `personal_finance_category`
+  buckets (primary and/or detailed), and have any matching transaction —
+  newly synced or already sitting uncategorized — sort into it
+  automatically, same end result as the existing manual "Categorize…"
+  control, never locked (still freely re-categorizable/deletable after).
+- **Mocked the picker UI live before writing any code** (the visualize
+  tool, mid-Plan-Mode, per the user's own "show me how this will look"
+  ask) — a checkbox-tree picker (primary bucket groups with a whole-bucket
+  checkbox, individually-checkable detailed children below, removable
+  chips for whatever's selected) — then confirmed the interaction pattern
+  against the actual design questions still open.
+- **Confirmed via `AskUserQuestion`** before implementing: (1) add a
+  **minimal edit capability** for the bucket mapping specifically (not
+  full category editing) — today categories/sources can only be created
+  or deleted, and deleting cascades away all historical purchases, so
+  being unable to adjust a mapping without losing history was a real gap;
+  (2) **most specific match wins** on overlapping buckets across
+  categories/sources (a category mapped to the exact detailed bucket
+  beats one mapped only to the broader primary bucket), with the picker
+  itself already supporting this since primary/detailed buckets are
+  independently checkable per category.
+- **Fetched Plaid's actual current taxonomy rather than hardcoding from
+  memory** — `plaid.com/documents/pfc-taxonomy-all.csv` — confirming the
+  18-primary/~104-detailed v2 structure (the earlier session's
+  `LOAN_DISBURSEMENTS`/`OTHER` flag was correct: v1's CSV export was
+  missing both). New `src/lib/plaidCategories.ts` holds the full static
+  taxonomy (a `group()` builder + a small acronym-aware `humanize()` for
+  labels — "ATM fees," "EWA," "BNPL," "TV and movies" render correctly
+  rather than "Atm fees"/"Bnpl"), split into `SPENDING_PLAID_CATEGORIES`
+  (every primary except `INCOME`/`TRANSFER_IN`/`TRANSFER_OUT` — the
+  latter two are permanently excluded since this app's
+  `deriveTransactionType` already buckets them as `'transfer'`, never
+  shown or categorizable anywhere) and `INCOME_PLAID_CATEGORY` (just
+  `INCOME`'s 13 children, used by the income-source picker).
+- **Data model**: `autoCategorizeBuckets?: string[]` added to
+  `BudgetCategoryBase`/`IncomeSource` (and their Firestore doc mirrors) —
+  a flat array where each entry is either a primary bucket string (matches
+  any transaction with that primary) or a detailed bucket string (matches
+  only that specific detail); the two namespaces never collide since
+  detailed values are always `{primary}_{suffix}`, so no discriminant is
+  needed.
+- **Matching logic**: `resolveAutoCategory` (`src/lib/plaidCategoryMatch.ts`,
+  duplicated for `plaid-server`, same precedent as `recomputeSnapshot.ts`)
+  — checks every category/source for a detailed-level match first, falls
+  back to primary-level, ties resolve to whichever's first in the array
+  (a genuine user configuration overlap, not hard-prevented, per the
+  confirmed answer).
+- **Two trigger points**: (1) `plaid-server/src/routes/syncTransactions.ts`
+  now fetches the user's categories/incomeSources once per sync request
+  and, for each `added` transaction (and each `modified` transaction that
+  isn't *already* categorized — read from its current doc first, mirroring
+  the existing `removed`-dates read pattern), resolves a match and adds
+  the corresponding Purchase/Paycheck doc to the *same* batch as the
+  transaction write itself — one atomic operation, no separate categorize
+  call needed since the doc is being created fresh anyway. (2) New
+  `src/lib/firestore/autoCategorize.ts#runAutoCategorizeBackfill(uid)` —
+  called from `useBudgetStore`'s `addCategory`/`addIncomeSource`/
+  `setCategoryBuckets`/`setIncomeSourceBuckets` actions whenever a mapping
+  becomes non-empty — requeries the user's *full* current category/source
+  set (not just the one just touched, which is what makes "most specific
+  wins" correct against an older, more broadly-mapped category) plus every
+  currently-uncategorized `plaidTransaction`, and applies matches through
+  the existing `categorizePlaidTransactionAsSpending`/`AsIncome` — reused
+  as-is, no new write logic needed for the backfill sweep itself.
+- **Avoided a real circular-import trap while wiring the backfill call**:
+  `autoCategorize.ts` needs `writes.ts`'s categorize functions, so
+  `writes.ts` calling back into `autoCategorize.ts` would cycle. Resolved
+  by orchestrating the backfill call from `useBudgetStore.ts` instead
+  (already imports both layers) rather than from inside `writes.ts` —
+  `writeCategory`/`writeIncomeSource` themselves stay untouched, just
+  plain writes.
+- **New minimal edit capability**: `updateCategoryBuckets`/
+  `updateIncomeSourceBuckets` (`writes.ts`) — plain partial `updateDoc`
+  calls touching only `autoCategorizeBuckets`/`updatedAt`, nothing else
+  editable. Store actions named `setCategoryBuckets`/
+  `setIncomeSourceBuckets` (not `updateCategoryBuckets`, to avoid the
+  store action shadowing the imported `writes.ts` function of the same
+  name — caught before it shipped: object-literal method keys aren't
+  identifiers in their own closure scope, so the inner call would have
+  silently resolved to the *imported* function every time, not a real
+  recursion bug but a genuinely confusing same-name collision not worth
+  leaving in). `firestore.rules`' `categories`/`incomeSources` `update`
+  rules — present in the file since the 2026-07-21 timestamp work but
+  never actually reachable from any code path until now — finally get
+  exercised for real: added `hasValidAutoCategorizeBuckets()` (list-or-
+  absent check) to both `create` and `update`, and added
+  `updatedAt == request.time` to `update` (the exact check the file's own
+  `hasValidTimestamps()` doc comment had been anticipating since that
+  session). Confirmed Firestore's `update()` semantics mean the existing
+  field checks (`name is string` etc.) still resolve correctly against a
+  partial write, since `request.resource.data` reflects the *merged*
+  resulting document, not just the fields actually sent.
+- UI: new shared `src/components/budget/PlaidCategoryPicker.tsx` (the
+  approved mockup, built for real) used by `AddBudgetDialog`/
+  `AddIncomeSourceDialog` (wired into `addBudgetSchema`/
+  `addIncomeSourceSchema` as `autoCategorizeBuckets: z.array(z.string()
+  ).optional()`) and two small new edit dialogs
+  (`EditCategoryBucketsDialog`/`EditIncomeSourceBucketsDialog`, inline in
+  `CategoryPurchases.tsx`/`IncomeSourcePaychecks.tsx` next to the existing
+  "Delete category"/"Delete source" button) that open just the picker,
+  pre-filled, saving via the new store actions. Added the shadcn
+  `checkbox` component via the `clearbooks-add-shadcn` skill — left
+  unwrapped in `forwardRef` since nothing attaches a ref to it (the picker
+  manages selection as plain local/RHF-controller state, not
+  `register()`), matching that skill's "only fix what actually needs a
+  ref" guidance.
+- **Verified live against the real write paths** (not by trusting the UI
+  alone): seeded 4 uncategorized `plaidTransactions` directly via a
+  throwaway Admin SDK script (Whole Foods → `FOOD_AND_DRINK_GROCERIES`,
+  Chipotle → `FOOD_AND_DRINK_RESTAURANT`, Shell → `TRANSPORTATION_GAS`,
+  a salary deposit → `INCOME_SALARY`) — real Plaid Link testing wasn't
+  exercised this pass, same previously-documented hosted-iframe tooling
+  limitation. Created a "Groceries" category mapped to
+  `FOOD_AND_DRINK_GROCERIES` through the real Add-budget dialog (not a
+  direct write) and confirmed, via a second throwaway Admin SDK read: the
+  Whole Foods transaction was immediately auto-categorized into it (a real
+  Purchase doc created, `categoryId` set) while Chipotle/Shell stayed
+  untouched, and `monthlySnapshots/2026-08` correctly reflected the total
+  with no double-count. Confirmed live in the UI (after a full reload —
+  the Radix Tabs' programmatic-click flakiness recurred again this
+  session, same previously-documented tooling quirk, worked around by
+  reloading rather than fighting it) that Whole Foods now shows a
+  "Groceries" badge in Bank Activity while Chipotle/Shell still show
+  "Categorize…". Then edited the category via the real UI to add
+  `TRANSPORTATION_GAS` and confirmed Shell got swept up by the backfill
+  too (new Purchase created, `categoryId` set) while Chipotle still
+  didn't match — and confirmed the total stayed exactly `$184.42`
+  throughout (categorization is a bucket-transfer, not a total change, so
+  this also re-confirmed `recomputeSnapshot`'s idempotency property from
+  last session). `tsc -b`/`tsc --noEmit`/`lint` clean throughout. Deleted
+  both throwaway scripts and stopped every process started for
+  verification, confirmed via `netstat`. Not yet committed.
+
+### 2026-08-06 — Fixed two real auto-categorize bugs (duplicate purchases, stuck-after-delete)
+- User reported, from real usage: categorizing a food transaction created a
+  **duplicate** Purchase under the Food category, and after deleting one of
+  the duplicates, the transaction stayed permanently stuck "categorized" —
+  still showed a category badge (not "Categorize…") in Bank Activity, and
+  re-running auto-categorize never picked it back up. Traced both to real,
+  distinct root causes in `src/lib/firestore/writes.ts` — not edge cases,
+  genuine correctness bugs in code shipped the same day.
+- **Root cause 1 (stuck-after-delete): `deletePurchase`/`deletePaycheck`
+  never cleared the back-reference.** Categorizing a transaction sets
+  `categoryId`/`purchaseId` (or `sourceId`/`paycheckId`) on the
+  `PlaidTransaction` doc, pointing at the new Purchase/Paycheck. Deleting
+  that Purchase only ever deleted the Purchase doc itself — the
+  transaction's pointer stayed set, pointing at nothing. Since
+  `isPlaidTransactionCategorized` (and the backfill sweep's identical
+  check) only look at whether `categoryId`/`sourceId` is *set*, never at
+  whether the doc it points to still exists, the transaction was
+  permanently unrecoverable: stuck showing a category badge, silently
+  skipped by every future backfill. **This also meant deleting a
+  Plaid-sourced purchase silently made that money vanish from Monthly/
+  Yearly Spent entirely** — the amount was excluded from the real-Purchase
+  sum (deleted) *and* from the uncategorized-Plaid-transaction sum (still
+  marked categorized), a real financial-accuracy bug distinct from but
+  caused by the same gap.
+- **Fix**: `deletePurchase(uid, id, date)` now queries `plaidTransactions`
+  for `purchaseId == id` and clears `categoryId`/`purchaseId` (via
+  `deleteField()`) on any match in the same batch as the delete;
+  `deletePaycheck` does the identical thing for `sourceId`/`paycheckId`.
+  This correctly reverts the transaction to genuinely uncategorized —
+  verified live that after deleting, Bank Activity immediately shows
+  "Categorize…" again, the amount keeps counting toward Spent (now via the
+  uncategorized-transaction path instead of the real-Purchase path, net
+  zero change to the total), and a fresh backfill sweep picks it back up.
+  No `firestore.rules` change needed — the existing `plaidTransactions`
+  `update` rule never referenced `categoryId`/`purchaseId`/`sourceId`/
+  `paycheckId` at all, so removing them was already permitted.
+- **Self-heal for transactions already stuck from before this fix**:
+  since the user's *existing* stuck transaction has no "undelete" event
+  left to trigger the new cleanup, `runAutoCategorizeBackfill`
+  (`src/lib/firestore/autoCategorize.ts`) now also checks, for every
+  transaction that already looks "categorized," whether the Purchase/
+  Paycheck it points to actually still exists (`isLinkTargetPresent`); if
+  not, it clears the stale reference and treats the transaction as
+  eligible for a fresh match in the same sweep. Practical effect: opening
+  any category's "Auto-categorize" edit dialog and hitting Save (even with
+  no changes) now repairs any transaction stuck from before this fix — no
+  separate migration script needed.
+- **Root cause 2 (duplicate purchases): no atomicity between "is this
+  already categorized" and "create the Purchase."**
+  `categorizePlaidTransactionAsSpending`/`AsIncome` used a plain
+  `writeBatch` with no read-check at all — two independent callers (a
+  manual "Categorize…" click and an auto-categorize backfill sweep, most
+  plausibly racing right after the user saved a category's bucket mapping
+  — the backfill it triggers isn't instant, and a manual click on the same
+  transaction in that window hits this) could each decide the transaction
+  was uncategorized and each create their own Purchase, with the
+  transaction doc's `categoryId` left reflecting whichever batch's
+  `update()` happened to commit last — but by then both Purchases already
+  existed independently.
+- **Fix**: rewrote both functions around Firestore's `runTransaction`
+  instead of a plain `writeBatch` — the callback reads the transaction
+  doc's current `categoryId`/`sourceId` first and no-ops (returns without
+  writing) if already set; Firestore automatically retries a transaction
+  whose read set was modified by another write before it commits, so of
+  two genuinely concurrent callers exactly one wins and the other safely
+  detects the conflict on retry and no-ops, rather than both succeeding.
+  `recomputeSnapshot` is now only called when the transaction actually did
+  something (`didCategorize`), not unconditionally.
+- **Verified both fixes live against the real write paths**: seeded an
+  uncategorized transaction via a throwaway Admin SDK script, categorized
+  it by creating a matching category through the real Add-budget dialog,
+  confirmed exactly one Purchase; deleted that Purchase via the real UI
+  and confirmed (via a second throwaway read) the transaction's
+  `categoryId`/`purchaseId` were both cleared, the UI immediately showed
+  "Categorize…" again, and Spent this month held steady at the same total;
+  re-saved the category's auto-categorize buckets (no changes) and
+  confirmed the now-genuinely-uncategorized transaction was swept back up
+  with exactly one new Purchase, no duplicate. **Verified the race fix
+  directly**: a throwaway script fired two concurrent "categorize" calls
+  at the same transaction (mirroring `categorizePlaidTransactionAsSpending`
+  exactly, via the Admin SDK's `runTransaction` — same conflict-detection
+  semantics as the client SDK) and confirmed exactly one succeeded
+  (`didCategorize: true`), the other correctly detected the conflict and
+  no-op'd (`didCategorize: false`), leaving exactly one Purchase and a
+  transaction doc whose `categoryId` matched it — reproducing the fixed
+  version of the exact bug the user hit. `tsc -b`/`tsc --noEmit`/`lint`
+  clean throughout. Deleted all three throwaway scripts and stopped every
+  process started for verification, confirmed via `netstat`. Not yet
+  committed.
+- **Known, not yet fixed**: `plaid-server`'s own server-side
+  auto-categorization (inside `syncTransactions.ts`'s batch, for `added`/
+  `modified` transactions) still isn't hardened against the identical race
+  if a client-side categorize call happens to land in the narrow window
+  between plaid-server reading a transaction's current state and its
+  batch commit. Converting that path to the same transactional pattern
+  would mean restructuring the whole batched multi-transaction sync into
+  a per-transaction-transaction model, losing the efficiency of writing
+  many transactions in one commit — out of scope for this pass, since the
+  bug the user actually hit was the client-side race (manual click vs.
+  client-side backfill), not this narrower server-sync one. Flagged here
+  rather than silently left unaddressed.
+
+### 2026-08-10 — Bank Activity filter bar (search, type/account pills, date sub-range)
+- User asked for filter pills above both Bank Activity sections (Spending's
+  and Income's) to filter transactions by type and account. Two rounds of
+  `AskUserQuestion` before writing code, since the request kept growing:
+  confirmed "type" means each transaction's `plaidCategoryPrimary` (the
+  coarse bucket already shown per row — `transactionType` itself is fixed
+  per section, so it wasn't a candidate); the user then also asked for a
+  merchant-name search box and a date sub-range in the same breath, and
+  asked for **multi-select** behavior (any number of type/account pills
+  active at once, OR within a facet, AND across facets) rather than the
+  single-select pattern `DateFilterTabs`/the summary cards already use;
+  finally confirmed the date control should be a real start/end sub-range
+  (narrowing further within whatever month/year is already selected up
+  top), not per-day pills, and that layout should be search-box-on-top
+  with pill rows below, mirroring how `DateFilterTabs` sits above page
+  content today.
+- Built this as one shared feature rather than duplicating it into both
+  Bank Activity components, since `SpendingBankActivity`/
+  `IncomeBankActivity` already share near-identical structure:
+  - `src/lib/plaidTransactionFilters.ts` — pure filter logic + the
+    `TransactionFilters` shape (`search`, `types: Set<string>`,
+    `accounts: Set<string>`, `startDate`/`endDate`). Empty
+    `types`/`accounts` = no filter on that facet (multi-select "nothing
+    selected" reads as "show everything," not "show nothing" — standard
+    for this kind of control). `startDate`/`endDate` default to the outer
+    range's own ISO bounds (`createEmptyFilters(range)`) rather than
+    starting blank, so the sub-range inputs are always pre-filled to
+    something meaningful and narrowing is opt-in (move either date
+    inward) instead of a second range to fill in from scratch.
+    `getDistinctTypes`/`getDistinctAccounts` generate pill options from
+    what's actually present in the current month/year's transactions, not
+    the full Plaid taxonomy — same "only show what's really there"
+    convention `CategoryBreakdownBar` already established for omitting
+    zero-spend categories. `applyTransactionFilters` combines all four
+    filters with AND.
+  - `src/components/plaid/TransactionFilterBar.tsx` — the shared UI:
+    search `Input` with a `Search` icon, a type-pill row (only rendered
+    when ≥2 distinct types are present — a single pill covering
+    everything would filter nothing, so it's hidden rather than shown as
+    dead weight; this is exactly what happened on the Income side in
+    testing, where both seeded transactions shared the same `INCOME`
+    primary and the type row correctly never rendered), an account-pill
+    row (same ≥2 threshold), and `From`/`To` date inputs whose `min`/`max`
+    are cross-constrained to each other and clamped to the outer range's
+    bounds so the sub-range can never be set outside what's actually
+    being viewed. A "Clear filters" button appears only once any filter
+    actually differs from the empty state (`hasActiveFilters`). Pills are
+    plain toggle `<button>`s (`aria-pressed`, rounded-full,
+    active/inactive styling built from the same `border-border`/
+    `bg-background`/`hover:bg-muted` tokens the `Button` `outline` variant
+    already uses) rather than shadcn `Checkbox` elements — the user's own
+    "filter pills" wording, and it keeps the visual language consistent
+    with `DateFilterTabs`'s existing tab/pill idiom instead of introducing
+    checkbox squares into a part of the UI that's never had them.
+  - New `src/components/plaid/` folder — this is genuinely shared,
+    Plaid-transaction-shaped UI, not owned by either the Spending or
+    Income feature the way `PlaidCategoryPicker` (category-mapping UI)
+    is anchored to `components/budget/`. First component in this
+    grouping; mirrors the existing "feature-specific component
+    groupings" convention with a new feature of its own rather than
+    force-fitting into `spending/`, `income/`, or `budget/`.
+  - Exported two previously-private helpers rather than duplicating them:
+    `primaryLabel` (`src/lib/plaidCategories.ts`) for humanizing an
+    arbitrary `plaidCategoryPrimary` pill label, and `toIsoDate`
+    (`src/lib/period.ts`) for seeding/clamping the date sub-range inputs
+    against the outer range's own bounds.
+  - `SpendingBankActivity.tsx`/`IncomeBankActivity.tsx`: added local
+    `filters` state (`useState(() => createEmptyFilters(range))`) with a
+    `useEffect` resetting it whenever `range` changes — mirrors
+    `CategoryPurchases`'s established "re-default on range change"
+    pattern, since a sub-range/pill selection from a previous month/year
+    wouldn't make sense (and its date bounds would literally be out of
+    range) once the shared date filter moves. The existing
+    `transactionType`+`isDateInRange` filter still runs first
+    (`candidateTransactions`) — that's what pill options are generated
+    from, so pills reflect the full month/year's data regardless of which
+    filters are currently active, not a shrinking set as you filter. The
+    card still returns `null` entirely when `candidateTransactions` is
+    empty (unchanged prior behavior); a new "No transactions match these
+    filters." message appears inside the card when filters narrow a
+    non-empty candidate set down to zero, so an active-but-fruitless
+    filter combination doesn't just look broken.
+- Lint caught one real style issue before it shipped: a ternary used
+  purely for its side effect (`next.has(value) ? next.delete(value) :
+  next.add(value)`) tripped `no-unused-expressions` — rewrote as a plain
+  `if`/`else` in the `toggle()` helper.
+- Verified end-to-end via the dev server + emulators (see
+  `clearbooks-verify` skill for the standard procedure): seeded 4 spending
+  transactions (2 `FOOD_AND_DRINK`, 1 `TRANSPORTATION`, 1
+  `GENERAL_MERCHANDISE`, split across 2 different account names) and 2
+  income transactions (both `INCOME`, split across 2 different accounts)
+  via a throwaway Admin SDK script. Confirmed the type-pill row shows 3
+  pills on Spending (correct — 3 distinct primaries present) and is
+  correctly absent on Income (only 1 distinct primary present, so nothing
+  to filter by); confirmed clicking "Transportation" alone narrowed to
+  just Shell, then clicking "Food and drink" too (multi-select) correctly
+  added both food transactions back while keeping General Merchandise's
+  Amazon excluded — real OR-within-facet, AND-across-facet behavior, not
+  just single-select with a different visual; confirmed the merchant
+  search (`"sh"`) matched only "Shell"; confirmed narrowing the date
+  sub-range to Aug 1–6 correctly excluded the Aug 7/Aug 9 transactions;
+  confirmed combining a stale search term with a narrowed date range that
+  together matched nothing rendered the new empty-state message instead
+  of a blank card; confirmed "Clear filters" reset every facet back to
+  the full unfiltered list; confirmed the identical account-pill
+  toggle behavior on the Income tab (filtering to just the Savings-account
+  transaction). Dark mode checked since this is new UI — pills, search
+  input, and date inputs all read with correct contrast in both states.
+  `tsc -b`/`lint` both clean throughout. Deleted the throwaway seed
+  script and stopped every process started for verification, confirmed
+  via `netstat`. Not yet committed.
+
+### 2026-08-10 — Bank Activity filters redesigned: explicit add-a-filter, not auto-pills
+- Immediate follow-up in the same day: the user found the just-shipped
+  auto-generated type/account pills confusing (every distinct value
+  present just appeared as a pill automatically) and asked for an
+  explicit, opt-in flow instead — an "Add" button opening a dropdown to
+  pick which category/subcategory/account to filter by, pills appearing
+  only once actually added. Then, one message later, expanded the scope
+  further: three separate add buttons (primary bucket, secondary bucket,
+  account), each its own facet, rather than one combined picker.
+- **Split what was one implicit "type" facet into two explicit ones**:
+  `TransactionFilters` (`src/lib/plaidTransactionFilters.ts`) gained a new
+  `details: Set<string>` field alongside `types`/`accounts`, filtering on
+  each transaction's detailed `plaidCategory` (e.g. "Groceries") separately
+  from its coarse `plaidCategoryPrimary` (e.g. "Food and drink") — the
+  user's literal ask was "primary bucket filters" and "secondary bucket
+  filters" as two independent, non-nested facets, not the primary/detail
+  checkbox-tree `PlaidCategoryPicker` already uses elsewhere for
+  auto-categorize mappings. New `getDistinctDetails(transactions)` labels
+  each detailed value via that same transaction's own
+  `plaidCategoryPrimary` (not a guessed one), reusing `detailLabel` — newly
+  exported from `src/lib/plaidCategories.ts` (previously private, only
+  used internally by that file's own `group()` calls). `getDistinctAccounts`
+  changed its return type from `string[]` to `{value, label}[]` to match
+  the other two facets' option shape, since all three now feed the same
+  generic picker component instead of being rendered by hand.
+- **Rewrote `TransactionFilterBar.tsx` around a new local
+  `FilterFacetPicker` component** — one "Add `<Category|Subcategory|
+  Account>`" button per facet, each a `Popover`+`Checkbox` list (mirrors
+  `PlaidCategoryPicker`'s existing chips+Popover+Checkbox pattern, but as
+  three independent flat lists instead of one grouped tree, since primary
+  and detailed are now separate facets rather than parent/child). Active
+  filters render as a single shared pill row below the three Add buttons
+  (not three separate per-facet pill rows) — each pill prefixed with its
+  facet name ("Category: Transportation", "Subcategory: Groceries",
+  "Account: …") so they stay unambiguous when mixed together, with the
+  same removable-chip styling `PlaidCategoryPicker` already established.
+  Nothing is pre-selected or auto-rendered anymore — a facet's dropdown
+  only ever adds a pill when the user explicitly checks an option, and
+  unchecking it there removes the pill exactly like clicking its own X
+  does (the two removal paths were already both present in
+  `PlaidCategoryPicker` and carried over here, not new). A facet's Add
+  button is hidden outright when it has zero options for the current
+  range (e.g. no transactions have any `plaidCategory` at all) — nothing
+  useful to add, so no point offering an empty dropdown.
+- `hasActiveFilters`/`applyTransactionFilters`/`createEmptyFilters` all
+  extended for the new `details` facet; filtering across all three facets
+  stays AND (a transaction must satisfy every active facet), OR within
+  each facet (multi-select, unchanged from the prior version).
+- Verified end-to-end via the dev server + emulators against the same
+  seeded dataset (4 spending / 2 income transactions across distinct
+  primaries, details, and accounts — reseeded fresh since the emulator has
+  no persistence across restarts): confirmed all three Add buttons render
+  with no pills pre-filled and the full unfiltered list showing; clicked
+  "+ Category" → checked "Transportation" → confirmed a single
+  "Category: Transportation" pill appeared and the list narrowed to just
+  Shell; added "+ Account" → "Checking …0000" on top of that (AND across
+  facets — Transportation only has a Credit-Card transaction) and
+  confirmed the list correctly went to the new "No transactions match
+  these filters." empty state; removed the account pill via its own X and
+  confirmed Shell came back; cleared filters, then opened "+ Subcategory"
+  and confirmed it listed the 4 detailed buckets present with clean labels
+  ("Groceries," not "Food and drink groceries"), selected "Groceries," and
+  confirmed it filtered to just Whole Foods Market; repeated the
+  Subcategory check on the Income tab and confirmed it correctly listed
+  "Gig economy"/"Salary" (income's own detailed buckets, not spending's).
+  Dark mode checked — Add buttons, active pills, and the popover checkbox
+  list all read with correct contrast. `tsc -b`/`lint` both clean
+  throughout. Deleted both throwaway scripts and stopped every process
+  started for verification, confirmed via `netstat`. Not yet committed.

@@ -1,7 +1,7 @@
-import { useEffect } from 'react'
+import { useEffect, useState } from 'react'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
-import { Trash2 } from 'lucide-react'
+import { Pencil, Trash2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -16,12 +16,73 @@ import {
   AlertDialogTitle,
   AlertDialogTrigger,
 } from '@/components/ui/alert-dialog'
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from '@/components/ui/dialog'
 import { useBudgetStore } from '@/stores/useBudgetStore'
 import { getSourcePaychecks } from '@/lib/income'
 import { defaultDateForRange, type DateRange } from '@/lib/period'
 import { addPaycheckSchema, type AddPaycheckInput } from '@/lib/schemas/budget'
 import { formatCurrency } from '@/lib/utils'
+import { PlaidCategoryPicker } from '@/components/budget/PlaidCategoryPicker'
+import { INCOME_PLAID_CATEGORY } from '@/lib/plaidCategories'
 import type { IncomeSource } from '@/types/incomeSource'
+
+const INCOME_PLAID_CATEGORY_GROUPS = [INCOME_PLAID_CATEGORY]
+
+// The only editable field on an income source — mirrors
+// EditCategoryBucketsDialog in CategoryPurchases.tsx exactly.
+function EditIncomeSourceBucketsDialog({ source }: { source: IncomeSource }) {
+  const [open, setOpen] = useState(false)
+  const [buckets, setBuckets] = useState<string[]>(source.autoCategorizeBuckets ?? [])
+  const setIncomeSourceBuckets = useBudgetStore((state) => state.setIncomeSourceBuckets)
+
+  function handleOpenChange(nextOpen: boolean) {
+    if (nextOpen) setBuckets(source.autoCategorizeBuckets ?? [])
+    setOpen(nextOpen)
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={handleOpenChange}>
+      <DialogTrigger asChild>
+        <Button variant="outline" size="sm">
+          <Pencil className="size-3.5" />
+          Auto-categorize
+        </Button>
+      </DialogTrigger>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>Auto-categorize transactions</DialogTitle>
+          <DialogDescription>
+            Matching bank deposits sort into "{source.name}" automatically. You can
+            always recategorize manually.
+          </DialogDescription>
+        </DialogHeader>
+        <PlaidCategoryPicker
+          groups={INCOME_PLAID_CATEGORY_GROUPS}
+          value={buckets}
+          onChange={setBuckets}
+        />
+        <DialogFooter>
+          <Button
+            onClick={() => {
+              setIncomeSourceBuckets(source.id, buckets)
+              setOpen(false)
+            }}
+          >
+            Save
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  )
+}
 
 // Same reasoning as CategoryPurchases's formatPurchaseDate: build the
 // display date from the string's own year/month/day rather than
@@ -90,7 +151,7 @@ export function IncomeSourcePaychecks({ source, range }: IncomeSourcePaychecksPr
                 <Button
                   variant="ghost"
                   size="icon-xs"
-                  onClick={() => removePaycheck(paycheck.id)}
+                  onClick={() => removePaycheck(paycheck.id, paycheck.date)}
                   aria-label={`Remove paycheck from ${formatPaycheckDate(paycheck.date)}`}
                 >
                   <Trash2 className="size-3.5" />
@@ -139,7 +200,8 @@ export function IncomeSourcePaychecks({ source, range }: IncomeSourcePaychecksPr
         </p>
       )}
 
-      <div className="flex justify-end border-t pt-3">
+      <div className="flex justify-end gap-2 border-t pt-3">
+        <EditIncomeSourceBucketsDialog source={source} />
         <AlertDialog>
           <AlertDialogTrigger asChild>
             <Button variant="destructive" size="sm">

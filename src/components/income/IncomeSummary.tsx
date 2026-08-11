@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { cn, formatCurrency } from '@/lib/utils'
 import { useBudgetStore } from '@/stores/useBudgetStore'
-import { getIncomeInRange } from '@/lib/income'
+import { usePeriodSnapshotStore } from '@/stores/usePeriodSnapshotStore'
 import { annualize, type DateFilterMode, type DateRange } from '@/lib/period'
 import {
   IncomeSourcesPieChart,
@@ -27,11 +27,9 @@ function selectableCardClass(isSelected: boolean): string {
 export function IncomeSummary({ mode, range }: IncomeSummaryProps) {
   const incomeSources = useBudgetStore((state) => state.incomeSources)
   const paychecks = useBudgetStore((state) => state.paychecks)
-  const plaidTransactions = useBudgetStore((state) => state.plaidTransactions)
+  const windowIncome = usePeriodSnapshotStore((state) => state.totalIncome)
 
   const [selectedMetric, setSelectedMetric] = useState<IncomeMetric>('window')
-
-  const windowIncome = getIncomeInRange(paychecks, plaidTransactions, range)
   // Complementary granularity, same pattern as BudgetSummary/IncomeOverview:
   // an annual projection while viewing a month, a monthly average while
   // viewing a whole year.
