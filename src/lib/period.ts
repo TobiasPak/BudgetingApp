@@ -20,7 +20,9 @@ function formatIsoDate(year: number, month: number, day: number): string {
   return `${year}-${pad(month)}-${pad(day)}`
 }
 
-function toIsoDate(date: Date): string {
+// Exported for TransactionFilterBar's date sub-range inputs, which need to
+// seed/clamp against the outer range's own ISO bounds.
+export function toIsoDate(date: Date): string {
   return formatIsoDate(date.getFullYear(), date.getMonth() + 1, date.getDate())
 }
 

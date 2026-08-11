@@ -37,6 +37,17 @@ export interface FirestorePlaidTransactionDoc {
   paycheckId?: string
 }
 
+// Mirrors src/lib/firestore/types.ts's PeriodSnapshotDoc. Duplicated for the
+// same reason as FirestorePlaidTransactionDoc above — this is a separate
+// runtime/tsconfig. Written here by lib/recomputeSnapshot.ts and
+// routes/syncBalance.ts's balance-stamping.
+export interface PeriodSnapshotDoc {
+  totalSpent: number
+  totalIncome: number
+  bankBalance?: number
+  bankBalanceAsOf?: string
+}
+
 // One linked account under a Plaid Item — name/mask only, enough to
 // distinguish accounts of the same institution in the UI (e.g. "Plaid
 // Checking ...0000" vs "Plaid Credit Card ...1111"). Not the full Plaid

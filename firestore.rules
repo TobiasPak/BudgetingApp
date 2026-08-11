@@ -8,16 +8,23 @@ service cloud.firestore {
     // createdAt/updatedAt are set via serverTimestamp() (see
     // src/lib/firestore/writes.ts) — this rejects any write that doesn't
     // set both to the server's own authoritative time, so a client can't
-    // spoof an earlier/later timestamp. Only checked on create: there's no
-    // update path for any of these 4 collections yet (every write is a
-    // brand-new document), so an update rule requiring this doesn't have
-    // a real use case to validate against yet. When an edit feature is
-    // eventually built, the update rule should require
-    // `updatedAt == request.time` and `createdAt == resource.data.createdAt`
-    // (unchanged) instead of this same check.
+    // spoof an earlier/later timestamp. Only checked on create — paychecks/
+    // purchases/plaidTransactions still have no update path that changes
+    // createdAt, so their update rules don't call this. categories/
+    // incomeSources now do have a real update path (setCategoryBuckets/
+    // setIncomeSourceBuckets, src/lib/firestore/writes.ts) — see those
+    // match blocks below for the corresponding
+    // `updatedAt == request.time` check on update.
     function hasValidTimestamps() {
       return request.resource.data.createdAt == request.time
         && request.resource.data.updatedAt == request.time;
+    }
+
+    // Both null (never set) and an empty list are valid "no auto-
+    // categorize mapping" states — only reject a non-list value.
+    function hasValidAutoCategorizeBuckets() {
+      return !('autoCategorizeBuckets' in request.resource.data)
+        || request.resource.data.autoCategorizeBuckets is list;
     }
 
     match /users/{userId} {
@@ -36,13 +43,22 @@ service cloud.firestore {
           && request.resource.data.color is string
           && request.resource.data.resetDay is number
           && request.resource.data.type in ['fixed', 'percentage']
+          && hasValidAutoCategorizeBuckets()
           && hasValidTimestamps();
+        // The only update path today is setCategoryBuckets (src/lib/
+        // firestore/writes.ts#updateCategoryBuckets) — a partial write
+        // touching only autoCategorizeBuckets/updatedAt. Firestore's
+        // update() merges into the existing doc, so the other fields below
+        // still resolve to their unchanged values — this just re-validates
+        // they're still well-typed, same checks as create.
         allow update: if isOwner(userId)
           && request.resource.data.name is string
           && request.resource.data.iconName is string
           && request.resource.data.color is string
           && request.resource.data.resetDay is number
-          && request.resource.data.type in ['fixed', 'percentage'];
+          && request.resource.data.type in ['fixed', 'percentage']
+          && hasValidAutoCategorizeBuckets()
+          && request.resource.data.updatedAt == request.time;
       }
 
       match /incomeSources/{sourceId} {
@@ -52,12 +68,15 @@ service cloud.firestore {
           && request.resource.data.iconName is string
           && request.resource.data.color is string
           && request.resource.data.incomeType in ['w2', 'contracted', 'selfEmployed']
+          && hasValidAutoCategorizeBuckets()
           && hasValidTimestamps();
         allow update: if isOwner(userId)
           && request.resource.data.name is string
           && request.resource.data.iconName is string
           && request.resource.data.color is string
-          && request.resource.data.incomeType in ['w2', 'contracted', 'selfEmployed'];
+          && request.resource.data.incomeType in ['w2', 'contracted', 'selfEmployed']
+          && hasValidAutoCategorizeBuckets()
+          && request.resource.data.updatedAt == request.time;
       }
 
       match /paychecks/{paycheckId} {
@@ -118,6 +137,31 @@ service cloud.firestore {
           && request.resource.data.plaidCategory == resource.data.plaidCategory
           && request.resource.data.transactionType == resource.data.transactionType
           && request.resource.data.createdAt == resource.data.createdAt
+          && request.resource.data.updatedAt == request.time;
+      }
+
+      // Precomputed per-period totals — see src/lib/firestore/
+      // recomputeSnapshot.ts (client writes) and plaid-server's own copy of
+      // that logic (Plaid-driven writes). Client can read (drives every
+      // headline total/history lookup) and write (manual purchase/paycheck
+      // edits recompute these directly, not via a Cloud Function), but only
+      // ever as a full, type-checked overwrite of its own numbers — no
+      // delete, since a snapshot is never removed, only recomputed.
+      match /monthlySnapshots/{periodId} {
+        allow read: if isOwner(userId);
+        allow create, update: if isOwner(userId)
+          && request.resource.data.totalSpent is number
+          && request.resource.data.totalIncome is number
+          && (!('bankBalance' in request.resource.data) || request.resource.data.bankBalance is number)
+          && request.resource.data.updatedAt == request.time;
+      }
+
+      match /yearlySnapshots/{periodId} {
+        allow read: if isOwner(userId);
+        allow create, update: if isOwner(userId)
+          && request.resource.data.totalSpent is number
+          && request.resource.data.totalIncome is number
+          && (!('bankBalance' in request.resource.data) || request.resource.data.bankBalance is number)
           && request.resource.data.updatedAt == request.time;
       }
 

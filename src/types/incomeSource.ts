@@ -23,6 +23,13 @@ export interface IncomeSource {
   color: ChartColorToken
   isCustom?: boolean
   incomeType: IncomeType
+  // Plaid personal_finance_category bucket values under the INCOME primary
+  // (e.g. "INCOME_SALARY") that auto-sort a matching synced Plaid
+  // transaction into this source — same mechanism as BudgetCategory's field
+  // of the same name, see src/lib/plaidCategoryMatch.ts /
+  // src/lib/firestore/autoCategorize.ts. Editable after creation via
+  // updateIncomeSourceBuckets.
+  autoCategorizeBuckets?: string[]
   // Server-assigned audit timestamps — see Paycheck/Purchase for why these
   // are optional and distinct from any user-entered date.
   createdAt?: string

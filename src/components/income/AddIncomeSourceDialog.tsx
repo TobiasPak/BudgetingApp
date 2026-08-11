@@ -26,7 +26,11 @@ import {
   addIncomeSourceSchema,
   type AddIncomeSourceInput,
 } from '@/lib/schemas/income'
+import { PlaidCategoryPicker } from '@/components/budget/PlaidCategoryPicker'
+import { INCOME_PLAID_CATEGORY } from '@/lib/plaidCategories'
 import type { ChartColorToken } from '@/types/budget'
+
+const INCOME_PLAID_CATEGORY_GROUPS = [INCOME_PLAID_CATEGORY]
 
 // Same reasoning as AddBudgetDialog's chartColors: no icon/color picker UI
 // yet, so cycling through the 5 chart tokens by source count keeps
@@ -52,7 +56,7 @@ export function AddIncomeSourceDialog() {
     formState: { errors },
   } = useForm<AddIncomeSourceInput>({
     resolver: zodResolver(addIncomeSourceSchema),
-    defaultValues: { name: '' },
+    defaultValues: { name: '', autoCategorizeBuckets: [] },
   })
 
   function onSubmit(data: AddIncomeSourceInput) {
@@ -63,8 +67,11 @@ export function AddIncomeSourceDialog() {
       color,
       isCustom: true,
       incomeType: data.incomeType,
+      autoCategorizeBuckets: data.autoCategorizeBuckets?.length
+        ? data.autoCategorizeBuckets
+        : undefined,
     })
-    reset({ name: '' })
+    reset({ name: '', autoCategorizeBuckets: [] })
     setOpen(false)
   }
 
@@ -119,6 +126,25 @@ export function AddIncomeSourceDialog() {
                 {errors.incomeType.message}
               </p>
             )}
+          </div>
+
+          <div className="space-y-1.5 border-t pt-4">
+            <Label>Auto-categorize transactions</Label>
+            <p className="text-xs text-muted-foreground">
+              Matching bank deposits sort into this source automatically. You can always
+              recategorize manually.
+            </p>
+            <Controller
+              name="autoCategorizeBuckets"
+              control={control}
+              render={({ field }) => (
+                <PlaidCategoryPicker
+                  groups={INCOME_PLAID_CATEGORY_GROUPS}
+                  value={field.value ?? []}
+                  onChange={field.onChange}
+                />
+              )}
+            />
           </div>
 
           <DialogFooter>

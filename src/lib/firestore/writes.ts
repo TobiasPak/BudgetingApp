@@ -1,15 +1,18 @@
 import {
   collection,
-  deleteDoc,
+  deleteField,
   doc,
   getDocs,
   query,
+  runTransaction,
   serverTimestamp,
   setDoc,
+  updateDoc,
   where,
   writeBatch,
 } from 'firebase/firestore'
 import { db } from '@/lib/firebase'
+import { recomputeSnapshot, recomputeSnapshotsForDates } from './recomputeSnapshot'
 import type {
   FirestoreCategoryDoc,
   FirestoreIncomeSourceDoc,
@@ -44,28 +47,89 @@ export function writeIncomeSource(uid: string, source: FirestoreIncomeSourceDoc)
   })
 }
 
-export function writePaycheck(uid: string, paycheck: FirestorePaycheckDoc) {
-  return setDoc(doc(collection(db, 'users', uid, 'paychecks')), {
+// The only editable field on either entity today — see BudgetCategoryBase.
+// autoCategorizeBuckets / IncomeSource.autoCategorizeBuckets. A plain
+// partial updateDoc; firestore.rules' update rule re-validates every other
+// existing field is still well-typed (Firestore's update() merges into the
+// existing doc, so those fields resolve to their unchanged values).
+export function updateCategoryBuckets(uid: string, categoryId: string, buckets: string[]) {
+  return updateDoc(doc(db, 'users', uid, 'categories', categoryId), {
+    autoCategorizeBuckets: buckets,
+    updatedAt: serverTimestamp(),
+  })
+}
+
+export function updateIncomeSourceBuckets(uid: string, sourceId: string, buckets: string[]) {
+  return updateDoc(doc(db, 'users', uid, 'incomeSources', sourceId), {
+    autoCategorizeBuckets: buckets,
+    updatedAt: serverTimestamp(),
+  })
+}
+
+export async function writePaycheck(uid: string, paycheck: FirestorePaycheckDoc) {
+  await setDoc(doc(collection(db, 'users', uid, 'paychecks')), {
     ...paycheck,
     createdAt: serverTimestamp(),
     updatedAt: serverTimestamp(),
   })
+  await recomputeSnapshot(uid, paycheck.date)
 }
 
-export function deletePaycheck(uid: string, id: string) {
-  return deleteDoc(doc(db, 'users', uid, 'paychecks', id))
+// Takes the record's own date (every call site already has the full
+// Paycheck object in hand, not just its id) so the affected period's
+// snapshot can be recomputed after the delete — see recomputeSnapshot.ts.
+//
+// Also un-links any Plaid transaction that points at this paycheck
+// (paycheckId == id, set by categorizePlaidTransactionAsIncome). Without
+// this, deleting a Plaid-sourced paycheck left the source transaction
+// permanently stuck "categorized" — isPlaidTransactionCategorized (and the
+// auto-categorize backfill's same check) only look at sourceId/paycheckId
+// being *set*, not at whether the paycheck they point to still exists — so
+// it would keep showing a source badge in Bank Activity and never be
+// offered for (re-)categorization again, manual or automatic. Found via a
+// real user report.
+export async function deletePaycheck(uid: string, id: string, date: string) {
+  const linkedTransactions = await getDocs(
+    query(collection(db, 'users', uid, 'plaidTransactions'), where('paycheckId', '==', id))
+  )
+  const batch = writeBatch(db)
+  batch.delete(doc(db, 'users', uid, 'paychecks', id))
+  linkedTransactions.docs.forEach((transactionDoc) => {
+    batch.update(transactionDoc.ref, {
+      sourceId: deleteField(),
+      paycheckId: deleteField(),
+      updatedAt: serverTimestamp(),
+    })
+  })
+  await batch.commit()
+  await recomputeSnapshot(uid, date)
 }
 
-export function writePurchase(uid: string, purchase: FirestorePurchaseDoc) {
-  return setDoc(doc(collection(db, 'users', uid, 'purchases')), {
+export async function writePurchase(uid: string, purchase: FirestorePurchaseDoc) {
+  await setDoc(doc(collection(db, 'users', uid, 'purchases')), {
     ...purchase,
     createdAt: serverTimestamp(),
     updatedAt: serverTimestamp(),
   })
+  await recomputeSnapshot(uid, purchase.date)
 }
 
-export function deletePurchase(uid: string, id: string) {
-  return deleteDoc(doc(db, 'users', uid, 'purchases', id))
+// Same un-linking as deletePaycheck above, for purchases (purchaseId == id).
+export async function deletePurchase(uid: string, id: string, date: string) {
+  const linkedTransactions = await getDocs(
+    query(collection(db, 'users', uid, 'plaidTransactions'), where('purchaseId', '==', id))
+  )
+  const batch = writeBatch(db)
+  batch.delete(doc(db, 'users', uid, 'purchases', id))
+  linkedTransactions.docs.forEach((transactionDoc) => {
+    batch.update(transactionDoc.ref, {
+      categoryId: deleteField(),
+      purchaseId: deleteField(),
+      updatedAt: serverTimestamp(),
+    })
+  })
+  await batch.commit()
+  await recomputeSnapshot(uid, date)
 }
 
 export function writeUserFields(uid: string, fields: Partial<FirestoreUserDoc>) {
@@ -86,9 +150,15 @@ export async function deleteCategory(uid: string, categoryId: string) {
     )
   )
   const batch = writeBatch(db)
-  purchasesToDelete.forEach((purchaseDoc) => batch.delete(purchaseDoc.ref))
+  const dates = purchasesToDelete.docs.map((purchaseDoc) => {
+    batch.delete(purchaseDoc.ref)
+    return (purchaseDoc.data() as FirestorePurchaseDoc).date
+  })
   batch.delete(doc(db, 'users', uid, 'categories', categoryId))
-  return batch.commit()
+  await batch.commit()
+  // The cascade can span many different months/years at once — recompute
+  // every distinct period touched, not just one.
+  await recomputeSnapshotsForDates(uid, dates)
 }
 
 export async function deleteIncomeSource(uid: string, sourceId: string) {
@@ -99,9 +169,13 @@ export async function deleteIncomeSource(uid: string, sourceId: string) {
     )
   )
   const batch = writeBatch(db)
-  paychecksToDelete.forEach((paycheckDoc) => batch.delete(paycheckDoc.ref))
+  const dates = paychecksToDelete.docs.map((paycheckDoc) => {
+    batch.delete(paycheckDoc.ref)
+    return (paycheckDoc.data() as FirestorePaycheckDoc).date
+  })
   batch.delete(doc(db, 'users', uid, 'incomeSources', sourceId))
-  return batch.commit()
+  await batch.commit()
+  await recomputeSnapshotsForDates(uid, dates)
 }
 
 // Categorizing a Plaid transaction creates a REAL Purchase/Paycheck doc
@@ -109,30 +183,54 @@ export async function deleteIncomeSource(uid: string, sourceId: string) {
 // manually-entered one — getCategorySpent/getIncomeInRange never need to
 // know Plaid exists, since they just query the same purchases/paychecks
 // collections either way) and marks the source transaction as resolved in
-// the same batch, so it's never offered for (re-)categorization again.
-// Today this is only ever called from a manual "Categorize as…" control in
-// the UI; the not-yet-built AI agent would call the equivalent operation
-// server-side from a Cloud Function instead (see functions/src/index.ts).
+// the same atomic operation, so it's never offered for (re-)categorization
+// again. Called both from the manual "Categorize as…" control in the UI
+// and from the auto-categorize backfill sweep (src/lib/firestore/
+// autoCategorize.ts) — those two can genuinely race on the same
+// transaction (e.g. a user clicks "Categorize…" on a transaction at the
+// same moment a backfill sweep, triggered by them saving a category's
+// bucket mapping, independently reaches that same transaction). Uses
+// runTransaction rather than a plain writeBatch specifically so this is
+// race-safe: it re-reads the transaction doc's current categoryId/sourceId
+// at commit time and no-ops if something else categorized it first —
+// Firestore automatically retries a transaction whose read set changed
+// before commit, so of two concurrent callers exactly one wins and the
+// other safely skips, instead of both creating a duplicate Purchase/
+// Paycheck. Found as a real bug (duplicate items) via user report.
 export async function categorizePlaidTransactionAsSpending(
   uid: string,
   transactionId: string,
   categoryId: string,
   purchase: { date: string; description: string; amount: number }
 ) {
-  const batch = writeBatch(db)
+  const transactionRef = doc(db, 'users', uid, 'plaidTransactions', transactionId)
   const purchaseRef = doc(collection(db, 'users', uid, 'purchases'))
-  batch.set(purchaseRef, {
-    categoryId,
-    ...purchase,
-    createdAt: serverTimestamp(),
-    updatedAt: serverTimestamp(),
+
+  const didCategorize = await runTransaction(db, async (tx) => {
+    const transactionSnap = await tx.get(transactionRef)
+    const data = transactionSnap.data()
+    if (!data || data.categoryId || data.sourceId) return false
+    tx.set(purchaseRef, {
+      categoryId,
+      ...purchase,
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+    })
+    tx.update(transactionRef, {
+      categoryId,
+      purchaseId: purchaseRef.id,
+      updatedAt: serverTimestamp(),
+    })
+    return true
   })
-  batch.update(doc(db, 'users', uid, 'plaidTransactions', transactionId), {
-    categoryId,
-    purchaseId: purchaseRef.id,
-    updatedAt: serverTimestamp(),
-  })
-  return batch.commit()
+
+  // Net change to the period's total is zero either way (moves from the
+  // "uncategorized Plaid" bucket to the "real Purchase" bucket), but only
+  // recompute when this call actually did something — a no-op race loser
+  // changed nothing, and the winner's own call already recomputes.
+  if (didCategorize) {
+    await recomputeSnapshot(uid, purchase.date)
+  }
 }
 
 export async function categorizePlaidTransactionAsIncome(
@@ -141,18 +239,28 @@ export async function categorizePlaidTransactionAsIncome(
   sourceId: string,
   paycheck: { date: string; amount: number }
 ) {
-  const batch = writeBatch(db)
+  const transactionRef = doc(db, 'users', uid, 'plaidTransactions', transactionId)
   const paycheckRef = doc(collection(db, 'users', uid, 'paychecks'))
-  batch.set(paycheckRef, {
-    sourceId,
-    ...paycheck,
-    createdAt: serverTimestamp(),
-    updatedAt: serverTimestamp(),
+
+  const didCategorize = await runTransaction(db, async (tx) => {
+    const transactionSnap = await tx.get(transactionRef)
+    const data = transactionSnap.data()
+    if (!data || data.categoryId || data.sourceId) return false
+    tx.set(paycheckRef, {
+      sourceId,
+      ...paycheck,
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+    })
+    tx.update(transactionRef, {
+      sourceId,
+      paycheckId: paycheckRef.id,
+      updatedAt: serverTimestamp(),
+    })
+    return true
   })
-  batch.update(doc(db, 'users', uid, 'plaidTransactions', transactionId), {
-    sourceId,
-    paycheckId: paycheckRef.id,
-    updatedAt: serverTimestamp(),
-  })
-  return batch.commit()
+
+  if (didCategorize) {
+    await recomputeSnapshot(uid, paycheck.date)
+  }
 }

@@ -33,6 +33,16 @@ interface BudgetCategoryBase {
   // counting — no stored total to manually zero out, unlike the old
   // monthlySpent field.
   resetDay: number
+  // Plaid personal_finance_category bucket values (primary, e.g.
+  // "FOOD_AND_DRINK", and/or detailed, e.g. "FOOD_AND_DRINK_GROCERIES" —
+  // see src/lib/plaidCategories.ts) that auto-sort a matching synced Plaid
+  // transaction into this category — see src/lib/plaidCategoryMatch.ts for
+  // the matching rule (detailed match wins over primary) and
+  // src/lib/firestore/autoCategorize.ts for where it's applied. Undefined/
+  // empty = no auto-categorization for this category. Editable after
+  // creation (unlike every other field on this type) via
+  // updateCategoryBuckets — see useBudgetStore.ts.
+  autoCategorizeBuckets?: string[]
   // Server-assigned audit timestamps — when this category was actually
   // created/edited in Firestore, distinct from any user-entered date.
   // Optional: categories written before this field existed don't have one.

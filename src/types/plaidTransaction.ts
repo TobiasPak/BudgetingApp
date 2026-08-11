@@ -24,11 +24,10 @@ export interface PlaidTransaction {
   // (the posted/settled date) — per Plaid's own docs, generally the more
   // accurate "when did I actually spend this" for a posted transaction.
   // Display-only: `date` still drives which month/year window a
-  // transaction counts toward everywhere in this app (getTotalSpent,
-  // getIncomeInRange, isDateInRange, etc.) — showing authorizedDate never
-  // changes a total, only what's displayed alongside it. Optional since
-  // Plaid doesn't always report it and older synced transactions predate
-  // this field.
+  // transaction counts toward everywhere in this app (recomputeSnapshot.ts,
+  // isDateInRange, etc.) — showing authorizedDate never changes a total,
+  // only what's displayed alongside it. Optional since Plaid doesn't always
+  // report it and older synced transactions predate this field.
   authorizedDate?: string
   // The raw merchant/description string as Plaid returns it (e.g.
   // "TARGET T-1234", not cleaned up into a human-friendly name).

@@ -3,8 +3,9 @@ import { IncomeSourceRow } from '@/components/income/IncomeSourceRow'
 import { AddIncomeSourceDialog } from '@/components/income/AddIncomeSourceDialog'
 import { IncomeBankActivity } from '@/components/income/IncomeBankActivity'
 import { useBudgetStore } from '@/stores/useBudgetStore'
+import { usePeriodSnapshotStore } from '@/stores/usePeriodSnapshotStore'
 import { useDateFilterStore, useDateFilterRange } from '@/stores/useDateFilterStore'
-import { getIncomeInRange, getSourceIncomeInRange } from '@/lib/income'
+import { getSourceIncomeInRange } from '@/lib/income'
 
 // Reads mode/range from the shared useDateFilterStore — same reasoning as
 // BudgetContent, lets this mount independently as both the standalone
@@ -12,12 +13,10 @@ import { getIncomeInRange, getSourceIncomeInRange } from '@/lib/income'
 export function IncomeContent() {
   const incomeSources = useBudgetStore((state) => state.incomeSources)
   const paychecks = useBudgetStore((state) => state.paychecks)
-  const plaidTransactions = useBudgetStore((state) => state.plaidTransactions)
 
   const mode = useDateFilterStore((state) => state.mode)
   const range = useDateFilterRange()
-
-  const windowIncome = getIncomeInRange(paychecks, plaidTransactions, range)
+  const windowIncome = usePeriodSnapshotStore((state) => state.totalIncome)
 
   return (
     <>

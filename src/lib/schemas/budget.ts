@@ -26,6 +26,7 @@ export const addBudgetSchema = z
     monthlyAmount: z.number().optional(),
     percent: z.number().optional(),
     basis: z.enum(['paycheck', 'monthlyIncome']).optional(),
+    autoCategorizeBuckets: z.array(z.string()).optional(),
   })
   .superRefine((data, ctx) => {
     if (data.type === 'fixed') {

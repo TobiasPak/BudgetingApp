@@ -21,6 +21,10 @@ interface FirestoreCategoryDocBase {
   color: ChartColorToken
   isCustom?: boolean
   resetDay: number
+  // Plaid bucket values that auto-sort matching transactions here — see
+  // BudgetCategoryBase.autoCategorizeBuckets (src/types/budget.ts) for the
+  // full explanation.
+  autoCategorizeBuckets?: string[]
   createdAt?: Timestamp
   updatedAt?: Timestamp
 }
@@ -47,6 +51,7 @@ export interface FirestoreIncomeSourceDoc {
   color: ChartColorToken
   isCustom?: boolean
   incomeType: IncomeType
+  autoCategorizeBuckets?: string[]
   createdAt?: Timestamp
   updatedAt?: Timestamp
 }
@@ -76,6 +81,25 @@ export interface FirestoreUserDoc {
   // succeeds — see plaid-server/src/routes/exchangeToken.ts. Optional
   // since every pre-Plaid user doc predates this field.
   hasLinkedBank?: boolean
+}
+
+// A period's precomputed totals — one doc per calendar month
+// (users/{uid}/monthlySnapshots/{YYYY-MM}) and one per calendar year
+// (users/{uid}/yearlySnapshots/{YYYY}). Written by src/lib/firestore/
+// recomputeSnapshot.ts (client writes) and plaid-server's own copy of the
+// same logic (Plaid-driven writes) — never computed in a component. See
+// recomputeSnapshot.ts for why this is a full requery-and-overwrite rather
+// than an incremental counter.
+export interface PeriodSnapshotDoc {
+  totalSpent: number
+  totalIncome: number
+  // Last real Plaid balance stamped during this period (plaid-server's
+  // syncBalance.ts, on every sync) — absent if no sync ever landed while
+  // this period was open (predates this feature, or Plaid was never synced
+  // during it). Never client-editable.
+  bankBalance?: number
+  bankBalanceAsOf?: string
+  updatedAt?: Timestamp
 }
 
 export interface FirestorePlaidTransactionDoc {

@@ -1,10 +1,12 @@
 import { Router } from 'express'
-import { FieldValue } from 'firebase-admin/firestore'
+import { FieldValue, type WriteBatch } from 'firebase-admin/firestore'
 import type { Transaction } from 'plaid'
 import { plaidClient } from '../plaidClient'
 import { requireAuth } from '../middleware/requireAuth'
 import { db } from '../firebaseAdmin'
 import { fetchAccountsMap } from '../lib/plaidAccounts'
+import { recomputeSnapshotsForDates } from '../lib/recomputeSnapshot'
+import { resolveAutoCategory, type AutoCategorizeTarget } from '../lib/plaidCategoryMatch'
 import type { FirestorePlaidTransactionDoc, PlaidItemDoc, PlaidTransactionType } from '../types'
 
 export const syncTransactionsRouter = Router()
@@ -53,10 +55,18 @@ function deriveAccountName(item: PlaidItemDoc, transaction: Transaction): string
 
 // Shared by both the `added` and `modified` write paths below (they used
 // to duplicate this construction inline). Saves plaidCategoryPrimary
-// (Plaid's coarse ~16-value bucket, e.g. "FOOD_AND_DRINK") separately from
+// (Plaid's coarse ~18-value bucket, e.g. "FOOD_AND_DRINK") separately from
 // plaidCategory (the much more granular "detailed" string) specifically so
 // a future auto-sort-into-budget-categories feature has a small, stable
 // set of values to match against instead of Plaid's full detailed taxonomy.
+// Both are derived from the same personal_finance_category object so they
+// populate as a consistent pair; when Plaid doesn't return that object at
+// all (older/legacy-categorized transactions), both fall back to the same
+// deprecated `category` array instead of just one of them silently ending
+// up populated and the other missing — category[0] is the coarse bucket in
+// that legacy taxonomy, playing the same role `primary` does in the modern
+// one, and the full array joined is what plaidCategory already fell back
+// to before this fix.
 // `raw` stores the complete Plaid transaction verbatim — see its doc
 // comment in types.ts for why (cursor sync means an uncaptured field on an
 // unmodified transaction is gone for good).
@@ -68,6 +78,10 @@ function deriveAccountName(item: PlaidItemDoc, transaction: Transaction): string
 // personal_finance_category for plenty of real and sandbox transactions,
 // so this isn't a hypothetical edge case.
 function buildTransactionDoc(item: PlaidItemDoc, transaction: Transaction): FirestorePlaidTransactionDoc {
+  const detailedCategory =
+    transaction.personal_finance_category?.detailed ?? transaction.category?.join(' > ')
+  const primaryCategory = transaction.personal_finance_category?.primary ?? transaction.category?.[0]
+
   return {
     accountName: deriveAccountName(item, transaction),
     amount: Math.abs(transaction.amount),
@@ -75,10 +89,8 @@ function buildTransactionDoc(item: PlaidItemDoc, transaction: Transaction): Fire
     ...(transaction.authorized_date ? { authorizedDate: transaction.authorized_date } : {}),
     merchantName: transaction.merchant_name ?? transaction.name,
     ...(transaction.logo_url ? { logoUrl: transaction.logo_url } : {}),
-    plaidCategory: transaction.personal_finance_category?.detailed ?? transaction.category?.join(' > ') ?? 'Uncategorized',
-    ...(transaction.personal_finance_category?.primary
-      ? { plaidCategoryPrimary: transaction.personal_finance_category.primary }
-      : {}),
+    plaidCategory: detailedCategory ?? 'Uncategorized',
+    ...(primaryCategory ? { plaidCategoryPrimary: primaryCategory } : {}),
     transactionType: deriveTransactionType(transaction.amount, transaction.personal_finance_category?.primary),
     pending: transaction.pending,
     raw: transaction,
@@ -92,12 +104,28 @@ function buildTransactionDoc(item: PlaidItemDoc, transaction: Transaction): Fire
 // implements in the conversation this was built from.
 syncTransactionsRouter.post('/sync_transactions', requireAuth, async (req, res) => {
   try {
-    const itemsSnapshot = await db.collection('users').doc(req.uid).collection('plaidItems').get()
+    const usersRef = db.collection('users').doc(req.uid)
+    const [itemsSnapshot, categoriesSnapshot, sourcesSnapshot] = await Promise.all([
+      usersRef.collection('plaidItems').get(),
+      usersRef.collection('categories').get(),
+      usersRef.collection('incomeSources').get(),
+    ])
+    // Fetched once for the whole request (not per item/per transaction) —
+    // a user's category/source bucket mappings don't change mid-sync, and
+    // this can be reused across every linked item.
+    const categories: AutoCategorizeTarget[] = categoriesSnapshot.docs.map((d) => ({
+      id: d.id,
+      autoCategorizeBuckets: d.data().autoCategorizeBuckets,
+    }))
+    const incomeSources: AutoCategorizeTarget[] = sourcesSnapshot.docs.map((d) => ({
+      id: d.id,
+      autoCategorizeBuckets: d.data().autoCategorizeBuckets,
+    }))
 
     let totalSynced = 0
     for (const itemDoc of itemsSnapshot.docs) {
       const item = itemDoc.data() as PlaidItemDoc
-      totalSynced += await syncOneItem(req.uid, item)
+      totalSynced += await syncOneItem(req.uid, item, categories, incomeSources)
     }
 
     res.json({ syncedCount: totalSynced })
@@ -106,6 +134,56 @@ syncTransactionsRouter.post('/sync_transactions', requireAuth, async (req, res) 
     res.status(502).json({ error: 'Failed to sync transactions from Plaid' })
   }
 })
+
+// Resolves an auto-categorize match for a freshly-built transaction doc and,
+// if found, adds the corresponding Purchase/Paycheck doc to the same batch
+// — mirrors categorizePlaidTransactionAsSpending/AsIncome
+// (src/lib/firestore/writes.ts) exactly, just done server-side via the
+// Admin SDK in the same batch as the transaction write itself, rather than
+// a separate call after the fact. Returns the fields to merge onto the
+// transaction doc (empty object when nothing matched).
+function applyAutoCategorization(
+  uid: string,
+  batch: WriteBatch,
+  transactionDoc: FirestorePlaidTransactionDoc,
+  categories: AutoCategorizeTarget[],
+  incomeSources: AutoCategorizeTarget[]
+): Partial<Pick<FirestorePlaidTransactionDoc, 'categoryId' | 'purchaseId' | 'sourceId' | 'paycheckId'>> {
+  const match = resolveAutoCategory(
+    {
+      transactionType: transactionDoc.transactionType,
+      plaidCategory: transactionDoc.plaidCategory,
+      plaidCategoryPrimary: transactionDoc.plaidCategoryPrimary,
+    },
+    categories,
+    incomeSources
+  )
+  if (!match) return {}
+
+  const usersRef = db.collection('users').doc(uid)
+  if (match.kind === 'category') {
+    const purchaseRef = usersRef.collection('purchases').doc()
+    batch.set(purchaseRef, {
+      categoryId: match.id,
+      date: transactionDoc.date,
+      description: transactionDoc.merchantName,
+      amount: transactionDoc.amount,
+      createdAt: FieldValue.serverTimestamp(),
+      updatedAt: FieldValue.serverTimestamp(),
+    })
+    return { categoryId: match.id, purchaseId: purchaseRef.id }
+  }
+
+  const paycheckRef = usersRef.collection('paychecks').doc()
+  batch.set(paycheckRef, {
+    sourceId: match.id,
+    date: transactionDoc.date,
+    amount: transactionDoc.amount,
+    createdAt: FieldValue.serverTimestamp(),
+    updatedAt: FieldValue.serverTimestamp(),
+  })
+  return { sourceId: match.id, paycheckId: paycheckRef.id }
+}
 
 // Self-healing backfill: items linked before per-account names existed
 // have no `accounts` map. Rather than requiring a re-link, fetch it once
@@ -129,12 +207,21 @@ async function ensureAccounts(uid: string, item: PlaidItemDoc): Promise<PlaidIte
   }
 }
 
-async function syncOneItem(uid: string, item: PlaidItemDoc): Promise<number> {
+async function syncOneItem(
+  uid: string,
+  item: PlaidItemDoc,
+  categories: AutoCategorizeTarget[],
+  incomeSources: AutoCategorizeTarget[]
+): Promise<number> {
   item = await ensureAccounts(uid, item)
 
   let cursor = item.cursor
   let hasMore = true
   let syncedCount = 0
+  // Every date this sync touches, across every page — a first-ever sync can
+  // span months of history. Recomputed once, deduped by month, after the
+  // whole sync finishes (see recomputeSnapshotsForDates).
+  const affectedDates = new Set<string>()
 
   const transactionsRef = db.collection('users').doc(uid).collection('plaidTransactions')
 
@@ -145,6 +232,22 @@ async function syncOneItem(uid: string, item: PlaidItemDoc): Promise<number> {
     })
     const { added, modified, removed, has_more, next_cursor } = response.data
 
+    // Plaid's `removed` entries only carry transaction_id, not date — read
+    // each doc's current data before deleting it so its period can still be
+    // recomputed afterward. Removed transactions are rare in practice
+    // (pending charges that never posted), so this extra read is cheap.
+    const removedDocs = await Promise.all(
+      removed.map((r) => transactionsRef.doc(r.transaction_id).get())
+    )
+    // Same reasoning for `modified`: need each one's CURRENT doc to know
+    // whether it's already categorized (manually or by an earlier auto-
+    // categorize pass) before deciding whether to attempt auto-
+    // categorization on it — a re-synced transaction that's already
+    // categorized must never be re-matched/re-categorized.
+    const modifiedDocs = await Promise.all(
+      modified.map((t) => transactionsRef.doc(t.transaction_id).get())
+    )
+
     const batch = db.batch()
     // Plaid's own transaction_id is the doc id — re-syncing a modified
     // transaction (e.g. pending -> posted) overwrites the same doc instead
@@ -154,18 +257,35 @@ async function syncOneItem(uid: string, item: PlaidItemDoc): Promise<number> {
     // on every write would silently overwrite the original createdAt each
     // time an existing transaction is re-synced.
     for (const transaction of added) {
+      const transactionDoc = buildTransactionDoc(item, transaction)
+      const categorization = applyAutoCategorization(
+        uid,
+        batch,
+        transactionDoc,
+        categories,
+        incomeSources
+      )
       batch.set(transactionsRef.doc(transaction.transaction_id), {
-        ...buildTransactionDoc(item, transaction),
+        ...transactionDoc,
+        ...categorization,
         createdAt: FieldValue.serverTimestamp(),
         updatedAt: FieldValue.serverTimestamp(),
       })
+      affectedDates.add(transaction.date)
     }
-    for (const transaction of modified) {
+    for (const [index, transaction] of modified.entries()) {
+      const existing = modifiedDocs[index].data() as FirestorePlaidTransactionDoc | undefined
+      const alreadyCategorized = Boolean(existing?.categoryId || existing?.sourceId)
+      const transactionDoc = buildTransactionDoc(item, transaction)
+      const categorization = alreadyCategorized
+        ? {}
+        : applyAutoCategorization(uid, batch, transactionDoc, categories, incomeSources)
       batch.set(
         transactionsRef.doc(transaction.transaction_id),
-        { ...buildTransactionDoc(item, transaction), updatedAt: FieldValue.serverTimestamp() },
+        { ...transactionDoc, ...categorization, updatedAt: FieldValue.serverTimestamp() },
         { merge: true }
       )
+      affectedDates.add(transaction.date)
     }
     // Plaid retracted these (e.g. a pending charge that never posted) —
     // unconditional delete. Safe even if already categorized: categorizing
@@ -173,8 +293,10 @@ async function syncOneItem(uid: string, item: PlaidItemDoc): Promise<number> {
     // categorizePlaidTransactionAsSpending/AsIncome) that doesn't reference
     // back to this doc, so deleting the raw record only removes it from
     // the Bank Activity log — the real Purchase/Paycheck is untouched.
-    for (const removedTransaction of removed) {
-      batch.delete(transactionsRef.doc(removedTransaction.transaction_id))
+    for (const removedDoc of removedDocs) {
+      batch.delete(removedDoc.ref)
+      const removedDate = removedDoc.data()?.date as string | undefined
+      if (removedDate) affectedDates.add(removedDate)
     }
     await batch.commit()
 
@@ -189,6 +311,10 @@ async function syncOneItem(uid: string, item: PlaidItemDoc): Promise<number> {
     .collection('plaidItems')
     .doc(item.itemId)
     .update({ cursor })
+
+  if (affectedDates.size > 0) {
+    await recomputeSnapshotsForDates(uid, Array.from(affectedDates))
+  }
 
   return syncedCount
 }

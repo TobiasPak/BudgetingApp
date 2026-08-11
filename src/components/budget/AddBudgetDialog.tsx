@@ -23,6 +23,8 @@ import {
 } from '@/components/ui/select'
 import { useBudgetStore } from '@/stores/useBudgetStore'
 import { addBudgetSchema, type AddBudgetInput } from '@/lib/schemas/budget'
+import { PlaidCategoryPicker } from '@/components/budget/PlaidCategoryPicker'
+import { SPENDING_PLAID_CATEGORIES } from '@/lib/plaidCategories'
 import type { ChartColorToken } from '@/types/budget'
 
 // New budgets don't have an icon/color picker UI yet — cycling through the
@@ -50,7 +52,7 @@ export function AddBudgetDialog() {
     formState: { errors },
   } = useForm<AddBudgetInput>({
     resolver: zodResolver(addBudgetSchema),
-    defaultValues: { type: 'fixed', name: '', resetDay: 1 },
+    defaultValues: { type: 'fixed', name: '', resetDay: 1, autoCategorizeBuckets: [] },
     // Without this, switching from "Fixed" to "Percentage" leaves the
     // now-hidden monthlyAmount field's stale value (an empty string run
     // through valueAsNumber, i.e. NaN) sitting in the form state — Zod's
@@ -72,18 +74,28 @@ export function AddBudgetDialog() {
       resetDay: data.resetDay,
     }
 
+    const autoCategorizeBuckets = data.autoCategorizeBuckets?.length
+      ? data.autoCategorizeBuckets
+      : undefined
+
     if (data.type === 'fixed') {
-      addCategory({ ...base, type: 'fixed', monthlyAmount: data.monthlyAmount! })
+      addCategory({
+        ...base,
+        type: 'fixed',
+        monthlyAmount: data.monthlyAmount!,
+        autoCategorizeBuckets,
+      })
     } else {
       addCategory({
         ...base,
         type: 'percentage',
         percent: data.percent!,
         basis: data.basis!,
+        autoCategorizeBuckets,
       })
     }
 
-    reset({ type: 'fixed', name: '', resetDay: 1 })
+    reset({ type: 'fixed', name: '', resetDay: 1, autoCategorizeBuckets: [] })
     setOpen(false)
   }
 
@@ -198,6 +210,25 @@ export function AddBudgetDialog() {
               </div>
             </>
           )}
+
+          <div className="space-y-1.5 border-t pt-4">
+            <Label>Auto-categorize transactions</Label>
+            <p className="text-xs text-muted-foreground">
+              Matching bank transactions sort into this category automatically. You can
+              always recategorize manually.
+            </p>
+            <Controller
+              name="autoCategorizeBuckets"
+              control={control}
+              render={({ field }) => (
+                <PlaidCategoryPicker
+                  groups={SPENDING_PLAID_CATEGORIES}
+                  value={field.value ?? []}
+                  onChange={field.onChange}
+                />
+              )}
+            />
+          </div>
 
           <DialogFooter>
             <Button type="submit">Add budget</Button>

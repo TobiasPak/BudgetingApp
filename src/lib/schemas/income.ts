@@ -10,6 +10,7 @@ export const addIncomeSourceSchema = z.object({
   incomeType: z.enum(['w2', 'contracted', 'selfEmployed'], {
     message: 'Choose how this income is taxed',
   }),
+  autoCategorizeBuckets: z.array(z.string()).optional(),
 })
 
 export type AddIncomeSourceInput = z.infer<typeof addIncomeSourceSchema>

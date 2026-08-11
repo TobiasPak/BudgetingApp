@@ -14,7 +14,10 @@ import {
   writeUserFields,
   categorizePlaidTransactionAsSpending,
   categorizePlaidTransactionAsIncome,
+  updateCategoryBuckets,
+  updateIncomeSourceBuckets,
 } from '@/lib/firestore/writes'
+import { runAutoCategorizeBackfill } from '@/lib/firestore/autoCategorize'
 import type {
   FirestoreCategoryDoc,
   FirestoreIncomeSourceDoc,
@@ -34,6 +37,8 @@ interface BudgetState {
   paychecks: Paycheck[]
   purchases: Purchase[]
   plaidTransactions: PlaidTransaction[]
+  // The last real Plaid-synced balance (plaid-server's syncBalance.ts) —
+  // never client-writable, see the removed setBankBalance note below.
   bankBalance: number
   // How many paychecks you expect per month — used to project a monthly
   // dollar target for "percentage of paycheck" budgets even before all of
@@ -51,13 +56,18 @@ interface BudgetState {
   error: string | null
   addCategory: (category: FirestoreCategoryDoc) => void
   removeCategory: (id: string) => void
+  // The only editable field on a category — see BudgetCategoryBase.
+  // autoCategorizeBuckets (src/types/budget.ts).
+  setCategoryBuckets: (id: string, buckets: string[]) => void
   addIncomeSource: (source: FirestoreIncomeSourceDoc) => void
   removeIncomeSource: (id: string) => void
+  setIncomeSourceBuckets: (id: string, buckets: string[]) => void
   addPaycheck: (paycheck: FirestorePaycheckDoc) => void
-  removePaycheck: (id: string) => void
+  // Takes the paycheck's own date (not just its id) so the affected period's
+  // snapshot can be recomputed — see src/lib/firestore/recomputeSnapshot.ts.
+  removePaycheck: (id: string, date: string) => void
   addPurchase: (purchase: FirestorePurchaseDoc) => void
-  removePurchase: (id: string) => void
-  setBankBalance: (amount: number) => void
+  removePurchase: (id: string, date: string) => void
   setPaychecksPerMonth: (count: number) => void
   // Turns a raw, uncategorized bank transaction into a real Purchase/
   // Paycheck — see categorizePlaidTransactionAsSpending/AsIncome in
@@ -108,6 +118,18 @@ function requireUid(): string | undefined {
   return uid
 }
 
+// Sweeps currently-uncategorized transactions whenever a category/source
+// gains a non-empty bucket mapping (create or edit) — skipped when buckets
+// is empty/undefined, since that can never produce a match. See
+// runAutoCategorizeBackfill's own doc comment for why it always requeries
+// the full current category/source set rather than just the one that
+// changed.
+function maybeBackfill(uid: string, buckets: string[] | undefined) {
+  if (buckets && buckets.length > 0) {
+    return runAutoCategorizeBackfill(uid)
+  }
+}
+
 function reportWriteError(action: string, err: unknown) {
   const message = err instanceof Error ? err.message : String(err)
   toast.error(`Couldn't ${action}`, { description: message })
@@ -122,19 +144,28 @@ export const useBudgetStore = create<BudgetState>((set) => ({
   addCategory: (category) => {
     const uid = requireUid()
     if (!uid) return
-    writeCategory(uid, category).catch((e) => reportWriteError('add category', e))
+    writeCategory(uid, category)
+      .then(() => maybeBackfill(uid, category.autoCategorizeBuckets))
+      .catch((e) => reportWriteError('add category', e))
   },
   removeCategory: (id) => {
     const uid = requireUid()
     if (!uid) return
     deleteCategory(uid, id).catch((e) => reportWriteError('delete category', e))
   },
+  setCategoryBuckets: (id, buckets) => {
+    const uid = requireUid()
+    if (!uid) return
+    updateCategoryBuckets(uid, id, buckets)
+      .then(() => maybeBackfill(uid, buckets))
+      .catch((e) => reportWriteError('update category', e))
+  },
   addIncomeSource: (source) => {
     const uid = requireUid()
     if (!uid) return
-    writeIncomeSource(uid, source).catch((e) =>
-      reportWriteError('add income source', e)
-    )
+    writeIncomeSource(uid, source)
+      .then(() => maybeBackfill(uid, source.autoCategorizeBuckets))
+      .catch((e) => reportWriteError('add income source', e))
   },
   removeIncomeSource: (id) => {
     const uid = requireUid()
@@ -143,32 +174,32 @@ export const useBudgetStore = create<BudgetState>((set) => ({
       reportWriteError('delete income source', e)
     )
   },
+  setIncomeSourceBuckets: (id, buckets) => {
+    const uid = requireUid()
+    if (!uid) return
+    updateIncomeSourceBuckets(uid, id, buckets)
+      .then(() => maybeBackfill(uid, buckets))
+      .catch((e) => reportWriteError('update income source', e))
+  },
   addPaycheck: (paycheck) => {
     const uid = requireUid()
     if (!uid) return
     writePaycheck(uid, paycheck).catch((e) => reportWriteError('add paycheck', e))
   },
-  removePaycheck: (id) => {
+  removePaycheck: (id, date) => {
     const uid = requireUid()
     if (!uid) return
-    deletePaycheck(uid, id).catch((e) => reportWriteError('remove paycheck', e))
+    deletePaycheck(uid, id, date).catch((e) => reportWriteError('remove paycheck', e))
   },
   addPurchase: (purchase) => {
     const uid = requireUid()
     if (!uid) return
     writePurchase(uid, purchase).catch((e) => reportWriteError('add purchase', e))
   },
-  removePurchase: (id) => {
+  removePurchase: (id, date) => {
     const uid = requireUid()
     if (!uid) return
-    deletePurchase(uid, id).catch((e) => reportWriteError('remove purchase', e))
-  },
-  setBankBalance: (amount) => {
-    const uid = requireUid()
-    if (!uid) return
-    writeUserFields(uid, { bankBalance: amount }).catch((e) =>
-      reportWriteError('update bank balance', e)
-    )
+    deletePurchase(uid, id, date).catch((e) => reportWriteError('remove purchase', e))
   },
   setPaychecksPerMonth: (count) => {
     const uid = requireUid()
